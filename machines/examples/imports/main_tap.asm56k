@@ -1,0 +1,56 @@
+; MAIN TAP: plays the main output, mono, now or up to two blocks late.
+;
+; Imports (main_tap.json):
+;   MAIN_POSITION  kind 1, symbol 5: the word holding this block's address
+;   MAIN_RING      kind 1, symbol 4: the first word of the 256-word ring
+;
+; The ring holds the last four 64-word blocks of the main output, one pair
+; a sample. Symbol 5's word is the address of the block to read now; it
+; moves on one block a frame. BACK selects this block or an older block
+; within the documented ring. A block never wraps,
+; so this block is simply 64 consecutive words. Reading an older block
+; needs symbol 4: step back from symbol 5's address inside the ring.
+;
+; The main output includes this track if it is routed there: with LEV high
+; that is a feedback loop. Route the track to an individual output, or keep
+; LEV low.
+;
+; Y:(r6+1) BACK: 0 this block, 1 or 2 blocks (32 or 64 samples) older
+; Y:(r6+2) LEV: output level, unipolar Q23
+
+        section MAIN_TAP
+
+INIT:
+        rts
+
+TRIG:
+        rts                             ; the main output plays all the time
+
+RENDER:
+        movec   #>$ffffff,m6
+MAIN_POSITION:
+        move    x:>$000000,a            ; symbol 5: this block's address
+        move    y:(r6+1),b              ; BACK
+        asl     #6,b,b                  ; 64 words a block
+        sub     b,a                     ; step back BACK blocks
+MAIN_RING:
+        move    #>$000000,x0            ; symbol 4: the ring's first word
+        sub     x0,a                    ; as an offset in the ring
+        and     #>$ff,a                 ; wrap inside the ring
+        add     x0,a                    ; back to an address
+        move    a1,r0
+        movec   #>$ffffff,m0
+        move    y:(r6+2),y0             ; LEV
+RENDER_LOOP:
+        do      #32,RENDER_END
+        move    x:(r0)+,a               ; the first word of the pair
+        move    x:(r0)+,x0              ; the second word
+        add     x0,a                    ; mono: their average
+        asr     a
+        move    a,x0
+        mpy     x0,y0,a
+        move    a,y:(r7)+
+RENDER_END:
+        rts
+
+        endsec

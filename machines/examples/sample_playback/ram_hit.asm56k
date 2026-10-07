@@ -1,0 +1,8 @@
+; SMP-RM: play what a RAM slot holds (bank 2), recorded by RAM-R or MAIN REC.
+BANK_ID equ 2
+REVERSE equ 0
+P_SLOT  equ 1
+P_START equ 2
+P_DEC   equ 3
+P_LEVEL equ 4
+        include "sample_player.inc"

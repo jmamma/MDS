@@ -1,0 +1,141 @@
+; PLUCK: a plucked string (Karplus-Strong) kept in the track's own memory.
+;
+; Import (pluck.json):
+;   TRACK_MEMORY  kind 2, symbol 6: the first word of track 1's 1,536
+;                 words of external memory
+;
+; Each track owns 1,536 words of external memory, one region after another.
+; INIT adds 1,536 words for each track before this one (R1 holds the track
+; number, 0...15) and keeps the result: that is this track's region. The
+; region is not cleared for the machine; this one plays nothing from it
+; until a trigger has filled the string.
+;
+; The string is a ring of L words at the start of the region, one period
+; long: L = 44,100 / frequency, at most 512 words. A trigger fills it with
+; noise, played as it goes in; after that each sample is the average of the
+; two oldest, times the loop gain DEC. The average takes a little more of
+; the highest frequencies on every pass, so the tone darkens as it decays.
+; L is a whole number of samples, so high notes are slightly out of tune.
+;
+; Y:(r6+1) PTCH: oscillator increment P; the frequency is P x 44,100 / 2^21
+; Y:(r6+2) DEC: loop gain, Q23
+; Y:(r6+3) LEV: output level, unipolar Q23
+; Y:(r6+9)  this track's region: the string's first word
+; Y:(r6+10) L - 1, the string's modulo; zero until the first trigger
+; Y:(r6+11) the string's position
+; Y:(r6+12) noise samples still to put into the string
+; Y:(r6+13) the oldest sample of the previous step
+; Y:(r6+14) noise generator state
+
+        section PLUCK
+
+INIT:
+        movec   #>$ffffff,m6
+        move    r1,a                    ; the track number, 0...15
+        move    a1,x0
+        asl     a                       ; 2 x track
+        add     x0,a                    ; 3 x track
+        asl     #9,a,a                  ; 1,536 x track
+TRACK_MEMORY:
+        move    #>$000000,x0            ; symbol 6: track 1's first word
+        add     x0,a
+        move    a1,y:(r6+9)             ; this track's region
+        move    a1,y:(r6+11)
+        clr     a
+        move    a,y:(r6+10)             ; silent until the first trigger
+        move    a,y:(r6+12)
+        move    a,y:(r6+13)
+        move    #>$5a5a5a,x0            ; any nonzero noise state
+        move    x0,y:(r6+14)
+        rts
+
+TRIG:
+        movec   #>$ffffff,m6
+        ; L = 2^21 / P samples. With the two-sample average the loop is
+        ; L + 1/2 samples long, so L rounded down is the nearest length.
+        move    y:(r6+1),x0             ; P
+        move    #>512,b                 ; the longest string (86 Hz)
+        move    #>4096,a                ; 2^21 / 512
+        cmp     x0,a
+        bgt     <TRIG_LENGTH            ; lower notes keep 512
+        clr     a
+        move    #>$200000,a0            ; 2^21, an integer in A0
+        asl     a                       ; integer division: shift it left once
+        rep     #24                     ; (which also clears the carry),
+        div     x0,a                    ; and A0 = 2^21 / P after 24 steps
+        move    a0,b
+        move    #>2,x0
+        cmp     x0,b
+        tlt     x0,b                    ; at least 2 words
+TRIG_LENGTH:
+        move    b1,y:(r6+12)            ; one period of noise first
+        sub     #1,b
+        move    b1,y:(r6+10)            ; L - 1
+        move    y:(r6+9),x0
+        move    x0,y:(r6+11)            ; the string starts at the region's start
+        clr     a
+        move    a,y:(r6+13)
+        rts
+
+RENDER:
+        movec   #>$ffffff,m6
+        move    y:(r6+10),a             ; L - 1
+        tst     a
+        beq     <SILENCE                ; not triggered yet
+        movec   a1,m0                   ; R0 wraps every L words
+        move    y:(r6+11),r0
+        move    y:(r6+3),y0             ; LEV
+        move    y:(r6+12),a
+        tst     a
+        ble     <STRING
+
+        ; The pluck: noise into the string, played as it goes in.
+        sub     #32,a
+        move    a1,y:(r6+12)
+        move    y:(r6+14),b             ; a 24-bit shift-register noise source
+        move    #>$c20001,x1            ; its taps: x^24 + x^23 + x^22 + x^17 + 1
+NOISE_LOOP:
+        do      #32,NOISE_END
+        lsl     b                       ; shift the register...
+        bcc     <NOISE_KEEP
+        eor     x1,b                    ; ...and feed the bit shifted out back in
+NOISE_KEEP:
+        move    b1,x0
+        move    x0,y:(r0)+              ; into the string
+        mpy     x0,y0,a
+        move    a,y:(r7)+               ; and out at LEV
+NOISE_END:
+        move    b1,y:(r6+14)
+        bra     <DONE
+
+        ; The string: each sample is the average of the two oldest.
+STRING:
+        move    y:(r6+2),x1             ; DEC: the loop gain
+        move    y:(r6+13),y1            ; the oldest sample of the previous step
+STRING_LOOP:
+        do      #32,STRING_END
+        move    y:(r0),x0               ; the oldest sample: one period ago
+        move    x0,a
+        add     y1,a                    ; plus the one before it
+        move    x0,y1
+        asr     a                       ; their average
+        move    a,x0
+        mpy     x0,x1,a                 ; times the loop gain
+        move    a,y:(r0)+               ; back into the string
+        move    a,x0
+        mpy     x0,y0,a
+        move    a,y:(r7)+               ; and out at LEV
+STRING_END:
+        move    y1,y:(r6+13)
+DONE:
+        move    r0,y:(r6+11)
+        movec   #>$ffffff,m0
+        rts
+
+SILENCE:
+        clr     a
+        rep     #32
+        move    a,y:(r7)+
+        rts
+
+        endsec

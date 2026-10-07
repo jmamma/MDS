@@ -1,0 +1,55 @@
+{
+  "id": "org.spsx.demo.internal-hit",
+  "display_name": "INTERNAL HIT",
+  "category": "SMP",
+  "short_label": "E1",
+  "machine_version": "1.1",
+  "params": [
+    {
+      "name": "SLOT",
+      "default": 8,
+      "min": 1,
+      "max": 21,
+      "transform": "index"
+    },
+    {
+      "name": "STRT",
+      "transform": "unipolar_q23"
+    },
+    {
+      "name": "DEC",
+      "default": 110,
+      "transform": "decay"
+    },
+    {
+      "name": "LEV",
+      "default": 96,
+      "transform": "unipolar_q23"
+    }
+  ],
+  "program": {
+    "y_workset_words": 18,
+    "relocations": [
+      "POSITION_LOOP",
+      "OUTPUT_LOOP"
+    ],
+    "imports": [
+      {
+        "symbol": "TRIG_INFO",
+        "abi_symbol": 9
+      },
+      {
+        "symbol": "POSITIONS",
+        "abi_symbol": 8
+      },
+      {
+        "symbol": "READ_SAMPLES",
+        "abi_symbol": 10
+      },
+      {
+        "symbol": "PCM",
+        "abi_symbol": 7
+      }
+    ]
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "id": "org.spsx.example.pluck",
+  "display_name": "PLUCK",
+  "description": "a plucked string",
+  "category": "EX",
+  "short_label": "PL",
+  "tonal": true,
+  "params": [
+    {
+      "name": "PTCH",
+      "default": 64,
+      "transform": "pitch"
+    },
+    {
+      "name": "DEC",
+      "default": 100,
+      "transform": "decay"
+    },
+    {
+      "name": "LEV",
+      "default": 100,
+      "transform": "unipolar_q23"
+    }
+  ],
+  "program": {
+    "y_workset_words": 15,
+    "relocations": [
+      "NOISE_LOOP",
+      "STRING_LOOP"
+    ],
+    "imports": [
+      {
+        "symbol": "TRACK_MEMORY",
+        "abi_symbol": 6
+      }
+    ]
+  }
+}

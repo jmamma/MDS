@@ -1,0 +1,250 @@
+* Machine Dump Protocol *
+-------------------------
+
+MDS version 1
+
+This document describes how to transfer MDS user machines to and from
+the Machinedrum using MIDI Sysex. See MDX_MachineDumpStandard.txt for
+the .mds file format.
+
+MDS version 1 is supported by Machinedrum OS X.20.
+
+Numbers prefixed with $ or 0x are hexadecimal. Other numbers are decimal.
+
+Message format:
+
+A machine dump contains one DSP56303 synthesis machine, installable in
+any of the 16 Machine Bank slots (01 to 16 on the device, Sysex slot
+numbers 0 to 15).
+
+(SYSEX init) = $F0 $00 $20 $3C $02 $00.
+
+Every message uses the following format:
+
+     MIDI Byte | Purpose
+  -------------+--------------------------------------------
+  (SYSEX init) |
+           $74 | USR machine message
+           $01 | MDS version
+     %0ooooooo | Command (see below)
+     %0ttttttt | Transaction ID, upper 7 bits
+     %0ttttttt | Transaction ID, lower 7 bits
+     %0sssssss | Slot: 0 to 15, or $7F where permitted
+     %0qqqqqqq | Packet sequence, or $7F when not applicable
+           $00 | Flags; zero in version 1
+           ... | 7-bit-packed body
+     %0ccccccc | Checksum, upper 7 bits
+     %0ccccccc | Checksum, lower 7 bits
+     %0lllllll | Length, upper 7 bits
+     %0lllllll | Length, lower 7 bits
+           $f7 | SYSEX end
+
+Checksum is the sum of bytes from the transaction ID through the end
+of the packed body, modulo $4000. It does not include (SYSEX init),
+$74, version, command, checksum, length or $F7.
+
+Length counts those same bytes plus the four checksum/length bytes.
+For E packed body bytes: length = E + 9; complete message = E + 19.
+
+Packing uses one mask byte followed by one to seven data bytes. Mask
+bits 6 to 0 hold the original high bits of data bytes 0 to 6. Each data
+byte then carries its low seven bits. Unused mask bits in the final
+group must be zero. MIDI realtime bytes are not part of the message.
+
+A data packet carries at most 420 unpacked bytes, or 480 packed bytes.
+The largest complete message is 499 bytes.
+
+Commands:
+
+  Command | Purpose             | Unpacked body
+----------------------------------------------------------------
+      $01 | Dump Header         | 42-byte transfer descriptor
+      $02 | Data Packet         | Up to 420 package bytes
+      $03 | Dump Request        | None
+      $04 | Query Machine Slots | None
+      $05 | Machine Slots Reply | 356-byte slot list
+      $06 | Capability Request  | None
+      $07 | Capability Reply    | 38-byte capabilities
+      $7B | End of Dump         | None
+      $7C | WAIT                | Command, reason
+      $7D | CANCEL              | Command, reason
+      $7E | NAK                 | Command, reason, 16-bit detail
+      $7F | ACK                 | 14-byte acknowledgement
+
+Query Machine Slots returns information for all 16 slots in the current
+machine library. Both the query and reply use slot $7F.
+
+Capability messages also use slot $7F. Dump Request can use a numbered
+slot or $7F for the selected slot. Dump Header, Data Packet and End of
+Dump must use a numbered slot.
+
+Capability Request, transaction 1:
+
+  F0 00 20 3C 02 00 74 01 06 00 01 7F 7F 00 01 7F 00 09 F7
+
+All multi-byte fields in unpacked bodies are big-endian.
+
+Dump Header body:
+
+  Bytes | Purpose
+----------------------------------------
+      4 | Complete package size
+      1 | Number of data packets
+      1 | Reserved, zero
+      4 | Package CRC-32
+     32 | Package content ID (SHA-256)
+
+Packet count is package size divided by 420, rounded up. Data packets
+are numbered from zero and carry consecutive package bytes. Every
+packet except the last contains exactly 420 unpacked bytes. The last
+contains only the remaining bytes. End of Dump uses packet count as
+its sequence number.
+
+Creating a .syx file from an .mds file:
+
+1. Create a Dump Header using the package size, CRC-32 and content ID
+   from MDS1 header bytes 8, 84 and 88 (see MDX_MachineDumpStandard.txt).
+2. Split the entire .mds file, including its header, into Data Packets
+   of up to 420 bytes, numbered from zero.
+3. Add an End of Dump message.
+
+Use the same transaction ID and destination slot for all messages.
+Apply the 7-bit packing, message format and checksum described above.
+
+Sending a machine (SEND, or in reply to Dump Request):
+
+A dump is sent either closed-loop or open-loop. In closed-loop transfer
+the receiver acknowledges each packet, so lost packets are resent and
+the sender knows the machine was stored. In open-loop transfer every
+message is sent without waiting for replies, so a plain Sysex recorder
+can capture the dump. The receiver's reply to the Dump Header decides
+which mode is used.
+
+The device sends a Dump Header, then waits up to 2000 ms for an ACK,
+timed from the end of the header. If no ACK arrives, it sends every Data
+Packet and End of Dump open-loop. Late ACK/NAK/WAIT replies are then
+ignored.
+
+An ACK to the header selects closed-loop transfer. Each matching ACK
+advances one packet. If no ACK arrives within 2000 ms, the current packet
+is sent again, and a matching WAIT restarts that window. A closed-loop
+transfer never falls back to open loop. A repairable NAK resends the
+indicated packet; a terminal rejection ends the send.
+
+Receiving a machine:
+
+The sender sends the Dump Header, each Data Packet in order and End of
+Dump, waiting for the receiver's reply to each before continuing. The
+transaction ID and wire slot must stay the same throughout a transfer.
+A message's wire slot is normally where the machine is stored, but a
+receiver may place it in a different slot; replies always repeat the
+wire slot received.
+
+Replies:
+
+  ACK     The message was accepted; send the next one. The ACK to End of
+          Dump has status 1 (installation committed) and confirms the
+          machine is validated and stored.
+  WAIT    Still processing. Keep waiting; do not send the next message.
+  NAK     The message was rejected. With reason CORRUPT and a non-zero
+          detail, it is a repair request: resend the command and sequence
+          it names (for End of Dump, the sequence is the packet count).
+          A second failure of the same message ends the transfer. Any
+          other NAK ends the transfer.
+  CANCEL  The receiver ended the transfer.
+
+A sender waiting for a Data Packet ACK may treat a repair NAK for the
+next sequence as a lost ACK and continue from that sequence. Repeating
+the current Dump Header or the last accepted Data Packet unchanged does
+not restart the transfer or write the packet twice. If the final ACK is
+lost, repeat End of Dump unchanged to get it again. A Dump Header sent
+after End of Dump starts a new transfer, even if it repeats the previous
+one, so saved .syx files can be sent back to back unchanged.
+
+A failed transfer never replaces the machine already installed in a slot.
+
+ACK body:
+
+  Bytes | Purpose
+----------------------------------------
+      1 | Accepted command
+      1 | Status: 0=accepted, 1=installation committed
+      4 | Library generation; zero before final commit
+      8 | First eight content-ID bytes; zero before final commit
+
+The final committed ACK confirms package validation and persistent storage.
+A packet ACK alone does not. The receiver may load the machine into the
+DSP later.
+
+Machine Slots Reply contains a 32-bit generation followed by sixteen
+22-byte records, in slot order (01 to 16):
+
+  Bytes | Purpose
+----------------------------------------
+      1 | State flags
+      1 | Machine model ID
+      2 | DSP program words
+      2 | Package bytes
+      8 | Slot alias, ASCII, padded with zero
+      8 | First eight content-ID bytes
+
+State flags: $01=PRESENT, $04=VALID, $08=IN USE, $10=DISABLED FOR BOOT.
+Other bits are reserved; ignore them.
+
+Capability Reply body, in order:
+
+  Bytes | Purpose
+----------------------------------------
+      2 | Maximum package bytes
+      2 | Maximum program words per package
+      2 | Maximum complete SYSEX packet bytes
+      2 | Total shared DSP program words
+      2 | Free DSP program words
+      2 | Library package-byte capacity
+      2 | Free library package bytes
+      1 | Slot count
+      1 | First model ID
+      1 | Last model ID
+      1 | Required value: 1
+      2 | Codec mask; bit 0 = raw 24-bit words
+      2 | Reserved
+      4 | Feature flags
+      4 | Reserved
+      4 | Frame cycle budget (clock cycles)
+      4 | Admission cycle budget (clock cycles)
+
+Free-space values refer to the machine library currently selected.
+
+Frame cycle budget is the DSP time available for one complete audio
+frame (71,680 clocks). Admission cycle budget is what sixteen tracks of
+one machine may cost together (63,216 clocks): divided by sixteen, it is
+the per-track limit a machine's declared cost is checked against (3,951
+clocks; see "Per-track cycle budget" in MDX_MachineDumpStandard.txt).
+
+Feature flags:
+
+  Bit | Services provided
+----------------------------------------
+    0 | SAMPLE_INFO and SAMPLE_READ (the internal and UW sample banks)
+    1 | RAM services: RAM bank access through SAMPLE_INFO and
+      | SAMPLE_READ, RAM_RECORD and RAM_WORKSPACE
+    2 | Category ordering from machine metadata
+
+Other bits are reserved; ignore them. Only use a feature if its bit is
+set. The features are described in MDX_MachineDumpStandard.txt.
+
+NAK reasons:
+
+   1 = Malformed message        10 = Slot in use
+   2 = Unsupported version      11 = Busy
+   3 = Unsupported command      12 = Storage failure
+   4 = Invalid slot             13 = DSP activation failure
+   5 = Too large                14 = Transaction conflict
+   6 = Corrupt data             15 = Internal fault
+   7 = Incompatible machine     16 = DSP program memory full
+   8 = Reserved                 17 = Library full
+   9 = Receiver not ready       18 = Cycle budget
+
+For reason 18, the NAK detail is the device's maximum permitted per-track
+clock count (3,951 in this version). Zero or a declared count above this
+limit causes the rejection.

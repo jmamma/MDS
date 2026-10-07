@@ -1,0 +1,77 @@
+; Sine Generator Example
+;
+; Y:(r6+1) pitch increment supplied by the host
+; Y:(r6+2) amplitude in unsigned Q23
+; Y:(r6+9..11) phase high/low and prior amplitude
+
+        section MDS_SINE
+
+        define  PARAM_PITCH  'y:(r6+$1)'
+        define  PARAM_AMP    'y:(r6+$2)'
+        define  PHASE_HI     'y:(r6+$9)'
+        define  PHASE_LO     'y:(r6+$a)'
+        define  AMP_PREVIOUS 'y:(r6+$b)'
+
+INIT:
+        move    #$0,x0
+        move    x0,PHASE_HI
+        move    x0,PHASE_LO
+        move    #>$7fffff,x0
+        move    x0,AMP_PREVIOUS
+        rts
+
+TRIG:
+        move    #$0,x0
+        move    x0,PHASE_HI
+        move    x0,PHASE_LO
+        rts
+
+RENDER:
+        ; Convert the pitch increment to a 24.24 phase step.
+        move    PARAM_PITCH,a
+        asr     #$6,a,a
+        move    a1,x1
+        move    a0,x0
+
+        move    PHASE_HI,b
+        move    PHASE_LO,b0
+
+        ; A is the interpolated gain. r3:r4 holds its exact 48-bit per-sample
+        ; increment; r5 keeps the target for publication after the block.
+        move    PARAM_AMP,a
+        move    a1,r5
+        move    AMP_PREVIOUS,y1
+        sub     y1,a
+        asr     #$5,a,a
+        move    a1,r3
+        move    a0,r4
+        move    AMP_PREVIOUS,a
+
+MDS_SINE_BLOCK_LOOP:
+        do      #$20,MDS_SINE_SAMPLE_END
+        move    r3,y1
+        move    r4,y0
+        add     y,a
+        move    a1,r1
+        move    a0,r2
+
+        move    b1,r0
+MDS_SINE_TABLE_READ:
+        move    x:(r0+>$000000),y0
+        move    r1,y1
+        mpy     y0,y1,a
+        asr     #$2,a,a
+        move    a,y:(r7)+
+
+        move    r1,a1
+        move    r2,a0
+        add     x,b
+        and     #$7fff,b
+MDS_SINE_SAMPLE_END:
+
+        move    b1,PHASE_HI
+        move    b0,PHASE_LO
+        move    r5,AMP_PREVIOUS
+        rts
+
+        endsec

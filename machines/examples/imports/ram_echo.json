@@ -1,0 +1,64 @@
+{
+  "id": "org.spsx.example.ram-echo",
+  "display_name": "RAM ECHO",
+  "description": "an echo on the track before, in a RAM slot (UW only)",
+  "category": "EX",
+  "short_label": "EC",
+  "retrigger": "continuous",
+  "neighbour": true,
+  "params": [
+    {
+      "name": "SLOT",
+      "default": 4,
+      "min": 1,
+      "max": 4,
+      "transform": "index",
+      "value_text": [
+        {
+          "value": 1,
+          "text": "R1"
+        },
+        {
+          "value": 2,
+          "text": "R2"
+        },
+        {
+          "value": 3,
+          "text": "R3"
+        },
+        {
+          "value": 4,
+          "text": "R4"
+        }
+      ]
+    },
+    {
+      "name": "TIME",
+      "default": 48,
+      "transform": "unipolar_q23"
+    },
+    {
+      "name": "FB",
+      "default": 64,
+      "transform": "unipolar_q23"
+    },
+    {
+      "name": "MIX",
+      "default": 64,
+      "transform": "unipolar_q23"
+    }
+  ],
+  "program": {
+    "y_workset_words": 12,
+    "relocations": [
+      "DRY_LOOP",
+      "ECHO_LOOP"
+    ],
+    "imports": [
+      {
+        "symbol": "WORKSPACE",
+        "abi_symbol": 11
+      }
+    ]
+  }
+}

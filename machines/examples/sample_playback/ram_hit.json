@@ -1,0 +1,74 @@
+{
+  "id": "org.spsx.demo.ram-hit",
+  "display_name": "RAM HIT",
+  "description": "plays what a RAM slot holds (UW only)",
+  "category": "SMP",
+  "short_label": "RM",
+  "machine_version": "1.0",
+  "params": [
+    {
+      "name": "SLOT",
+      "default": 1,
+      "min": 1,
+      "max": 4,
+      "transform": "index",
+      "value_text": [
+        {
+          "value": 1,
+          "text": "R1"
+        },
+        {
+          "value": 2,
+          "text": "R2"
+        },
+        {
+          "value": 3,
+          "text": "R3"
+        },
+        {
+          "value": 4,
+          "text": "R4"
+        }
+      ]
+    },
+    {
+      "name": "STRT",
+      "transform": "unipolar_q23"
+    },
+    {
+      "name": "DEC",
+      "default": 127,
+      "transform": "decay"
+    },
+    {
+      "name": "LEV",
+      "default": 100,
+      "transform": "unipolar_q23"
+    }
+  ],
+  "program": {
+    "y_workset_words": 18,
+    "relocations": [
+      "POSITION_LOOP",
+      "OUTPUT_LOOP"
+    ],
+    "imports": [
+      {
+        "symbol": "TRIG_INFO",
+        "abi_symbol": 9
+      },
+      {
+        "symbol": "POSITIONS",
+        "abi_symbol": 8
+      },
+      {
+        "symbol": "READ_SAMPLES",
+        "abi_symbol": 10
+      },
+      {
+        "symbol": "PCM",
+        "abi_symbol": 7
+      }
+    ]
+  }
+}

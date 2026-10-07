@@ -1,0 +1,886 @@
+* Machine Dump Standard (MDS) *
+--------------------------------
+
+MDS version 1
+
+MDS defines the .mds file format for user machines that run on the
+Machinedrum's DSP56303 digital signal processor.
+
+To install a machine, encode its .mds file as a MIDI Sysex (.syx) file
+and send it to the Machinedrum. See MDX_MachineDumpProtocol.txt for
+the encoding and transfer protocol.
+
+MDS version 1 is supported by Machinedrum OS X.20.
+
+Numbers prefixed with $ or 0x are hexadecimal. Other numbers are decimal.
+
+Contents:
+
+  1. Package format
+  2. DSP routines
+  3. Neighbour machines and stereo pairs
+  4. Imports and services
+  5. JSON source definition
+
+1. Package format
+=================
+
+An .mds file contains one machine, stored as a single package:
+
+  128-byte MDS1 header
+  DSP56303 program
+  Program address relocation flags
+  Import table
+  MDM1 machine description: 128-byte base plus optional value-text entries
+  128-byte machine sprite
+
+Sections start on four-byte boundaries, in the order shown. Alignment
+bytes are zero. Section offsets stored in the header count bytes from
+the package start; routine offsets count DSP words from the program start.
+Multi-byte integers are big-endian.
+
+Program data:
+
+Program data is raw, uncompressed DSP56303 machine code, not assembly
+text, ELF or LOD. It starts at package offset 128 ($80), right after the
+MDS1 header, and header offset 36 gives its length in bytes. Each 24-bit
+word is three bytes, most significant first: $123456 is $12 $34 $56.
+The loader copies it into DSP program memory (P memory).
+
+Generating the program:
+
+1. Write DSP56303 assembly containing three routines: INIT, TRIG and RENDER.
+   Use one contiguous P-memory section starting at address zero.
+2. Assemble it with a DSP56300-compatible assembler, such as Motorola
+   asm56300.
+3. Extract the assembled P-memory words and save each as three bytes,
+   most significant first.
+
+Use the routine symbol addresses for the package header. Include
+the relocation flags and import records described below.
+
+MDS1 header:
+
+Offsets count bytes from the package start (the "M" in "MDS1").
+
+  Offset | Bytes | Purpose
+-------------------------------------------------------------
+  Format
+       0 |     4 | "MDS1"
+       4 |     2 | MDS version: 1
+       6 |     2 | Header size: 128
+       8 |     4 | Complete package size, including padding
+      12 |     4 | Flags: zero
+      16 |     2 | Target: $5603 (DSP56303)
+      18 |     2 | Required value: 1
+      20 |     1 | Codec: 0 (raw 24-bit words)
+      21 |     1 | Reserved, zero
+  Machine resources
+      22 |     2 | Program words
+      24 |     2 | Import count, 0 to 64
+      26 |     2 | Per-track DSP X data-memory words used, at most 64
+      28 |     2 | Per-track DSP Y data-memory words used, at most 64
+      30 |     1 | Machine version: major, 0 to 255
+      31 |     1 | Machine version: minor, 0 to 255
+  Section layout
+      32 |     4 | Program data offset: 128
+      36 |     4 | Program data length in bytes
+      40 |     4 | Decoded program length in bytes: same as stored length
+      44 |     4 | Relocation flags offset
+      48 |     4 | Import table offset
+      52 |     2 | Machine-description size: 128 + 8 * value-text entry count
+      54 |     2 | Reserved, zero
+      56 |     4 | Machine-description offset
+      60 |     4 | Reserved, zero
+  Routine entry points
+      64 |     2 | INIT routine offset (DSP words)
+      66 |     2 | TRIG routine offset (DSP words)
+      68 |     2 | RENDER routine offset (DSP words)
+  Cycle budget
+      70 |     2 | Declared maximum per-track clocks; zero is not installable
+  Verification
+      72 |     4 | Reserved, zero
+      76 |     4 | Decoded program CRC-32
+      80 |     4 | Machine-description CRC-32
+      84 |     4 | Complete package CRC-32
+      88 |    32 | Content ID (SHA-256)
+     120 |     4 | Reserved, zero
+     124 |     4 | Reserved, zero
+
+Machine version is the author's own release number, separate from the
+MDS version: bytes 30=$01, 31=$02 mean 1.2, and 0.0 means unspecified.
+It is only displayed; the firmware never acts on it.
+
+CRCs use the standard reflected CRC-32 polynomial $EDB88320, with an
+initial value of $FFFFFFFF and final XOR of $FFFFFFFF. The program CRC
+covers the program bytes, and the description CRC covers the whole
+MDM1 description, including value-text entries. The package CRC covers
+the whole package with bytes 84 to 87 treated as zero.
+
+Calculate the content ID as SHA-256 of the package with bytes 84 to 119
+zeroed, followed by the decoded program bytes. Store it in bytes 88...119.
+
+Per-track cycle budget:
+
+Header bytes 70...71 report the machine's worst-case runtime cost: the
+most clock cycles it can use for one 32-sample block on one track.
+Include:
+
+  - the fixed firmware dispatch overhead per track
+  - TRIG plus RENDER together, for a block in which the track is triggered
+  - the most expensive parameter settings, notes and sample-service calls
+  - the program running from slow external memory
+
+  Hardware | Per-track limit
+  ---------+-----------------
+  MD MKI   | 3,951
+  MD MKII  | 3,951
+
+The limit guarantees that every track can run any installed machine at
+the same time. The firmware rejects a package that declares zero (an
+unfinished package) or more than the limit. It does not measure the
+machine itself, so measure the cost in a simulator before declaring it.
+
+MDM1 machine description:
+
+Offsets count bytes from the description start (the "M" in "MDM1"),
+located at the package offset stored in MDS1 header bytes 56...59.
+
+  Offset | Bytes | Purpose
+-------------------------------------------------------------
+       0 |     4 | "MDM1"
+       4 |     1 | Required value: 1
+       5 |     1 | Parameter count, 0 to 8
+       6 |     1 | Flags: bit 0=TONAL, bit 2=CONTINUOUS RETRIGGER,
+         |       | bit 3=NEIGHBOUR, bit 4=STEREO PAIR; other bits zero
+       7 |     1 | Parameter-link mask
+       8 |     4 | Category, padded with zero
+      12 |     2 | Two-character code
+      14 |     1 | Reserved, zero
+      15 |     1 | Category order: 1 to 254; 0 unspecified; 255 reserved
+      16 |    16 | Display name, padded with zero
+      32 |    32 | Stable machine ID, padded with zero
+      64 |    64 | Eight parameter descriptions, eight bytes each
+     128 |   8*n | Value-text entries, n = 0 to 32 (optional)
+
+Category order controls a user machine's position within its category,
+independently of the USR slot containing it. Lower nonzero values come
+first. Unspecified entries follow ordered entries. Equal order values,
+including zero, are sorted by the two-character code; duplicate codes use
+slot number as the final tie-breaker. Built-in machine positions remain
+unchanged. Moving a user machine between slots does not change its order
+relative to other machine codes.
+
+This is display metadata only: it does not change the stored slot, machine
+ID, kit assignments or MIDI addressing. Nonzero order requires capability
+feature bit 2 (see MDX_MachineDumpProtocol.txt). Older packages retain order
+zero. Earlier firmware may reject packages containing nonzero order.
+
+Each parameter description contains:
+
+  Bytes | Purpose
+----------------------------------------
+      4 | Parameter name, padded with zero
+      1 | Default value
+      1 | Minimum value
+      1 | Maximum value
+      1 | Upper four bits: control style; lower four bits: value conversion
+
+Minimum, maximum and default are 0 to 127. Minimum must be below maximum;
+default must be within that range. Unused parameter descriptions are zero.
+
+Parameter conversion and control style:
+
+Only the byte values below are valid. The firmware converts the 0...127
+setting before sending it to the DSP.
+
+  Byte / control style                     | Conversion   | DSP value
+  -----------------------------------------+--------------+-----------------------------------------------
+  $00 Continuous, $10 Bipolar, $20 Percent | Raw 14-bit   | Setting in units of 1/128; 64 becomes 8192
+  $01 Continuous, $21 Percent              | Unipolar Q23 | Positive level; 64 becomes 0.5
+  $02 Continuous, $22 Percent              | Squared Q23  | Squared level; 64 becomes 0.25
+  $13 Bipolar                              | Bipolar Q23  | Signed level; 0 becomes -1, 64 becomes zero
+  $54 Pitch                                | Pitch        | Oscillator increment using active tuning
+  $35 Switch                               | Boolean      | 0 or 1
+  $46 Rotary                               | Index        | Setting minus the declared minimum
+  $07 Continuous                           | Decay        | Per-sample envelope multiplier
+
+Q23 is signed 24-bit fixed-point with 23 fraction bits: $000000=0,
+$400000=0.5, $7FFFFF=just below 1, $800000=-1.
+
+Modulation can produce in-between settings, so DSP values are not
+limited to 128 steps.
+
+Bipolar shows the control centred on 64. The DSP value still depends on
+the conversion.
+
+Decay provides a Q23 coefficient to multiply the envelope by each sample:
+0 is shortest, 127 is longest, not infinite. Machines with a different
+decay law can use Raw 14-bit.
+
+Pitch supplies an oscillator increment P. Its frequency in Hz is
+P * 44,100 / 2^21, using the active tuning. For the 32,768-entry sine
+table, advance the table position by P / 64 per output sample, keeping
+the fractional part for subsequent samples.
+
+Pitch requires range 0...127; Switch requires 0...1. TONAL capability
+requires at least one Pitch parameter. CONTINUOUS RETRIGGER is described
+under "Retriggering" below.
+
+Parameter links:
+
+Set a bit to visually join the indicated controls. Parameter numbers
+below are 0 to 7; links do not couple their values.
+
+  Bit | Linked parameters
+  ----+------------------
+    0 | 0 and 1
+    1 | 1 and 2
+    2 | 2 and 3
+    4 | 4 and 5
+    5 | 5 and 6
+    6 | 6 and 7
+
+Bits 3 and 7 must be zero. Both linked parameters must exist.
+
+Optional parameter value text:
+
+A parameter can show text labels in place of some of its values, such
+as OFF for 0, SIN for 1...63 and SAW for 64...127. Labels change only
+the display, including held parameter locks. The values stored in kits,
+locks and MIDI, and the value sent to the DSP, are unchanged. Values
+without a label are displayed as usual.
+
+Each label is an 8-byte entry covering one value or a range of values;
+the example above is three entries. A range shows the same label for
+every value in it, but the encoder still steps through each value.
+Entries start at description offset 128. MDS1 header bytes 52...53 give
+the total description size, 128 + 8*n bytes.
+
+  Entry offset | Bytes | Purpose
+-------------------------------------------------------------
+             0 |     1 | Parameter index, 0..parameter_count-1
+             1 |     1 | First stored value, inclusive
+             2 |     1 | Last stored value, inclusive
+             3 |     1 | Reserved: zero
+             4 |     4 | Text, padded with zero (no terminator if full)
+
+  - Values are the stored 0...127 setting, before conversion, and lie
+    within the parameter's minimum and maximum.
+  - For a single value, first and last are equal.
+  - Sort entries by parameter index, then by first value. Ranges for the
+    same parameter must not overlap.
+  - Text is 1 to 4 visible ASCII characters ($21...$7E, no spaces).
+  - A machine can have at most 32 entries across all its parameters.
+  - An invalid entry rejects the whole package.
+
+Machine naming:
+
+  Field               | Rule
+  --------------------+------------------------------------------------
+  Category            | 1 to 3 uppercase letters or digits; P-I also allowed
+  Code                | Exactly 2 uppercase letters or digits
+  Reserved categories | MID, CTR, CTL
+  Example             | Category SYN and code SH are displayed as SYN-SH
+
+Store category and code separately, without the joining hyphen.
+Machines with the same category are grouped together on the device.
+ROM and RAM are allowed for user sample machines. Categories only affect
+naming and grouping; they do not select imports or change model IDs.
+
+Machine sprite:
+
+32x24 monochrome; 128 bytes immediately after the complete MDM1
+description, including any value-text entries.
+Store 32 big-endian 32-bit columns, left to right. Pixel (x,y) is bit
+y+8 of column x, with y=0 at the top; 1 draws the pixel. Bits 0 to 7
+must be zero. The field is mandatory; all-zero means no sprite.
+
+2. DSP routines
+===============
+
+Routine calls:
+
+  Routine | Purpose
+  --------+---------------------------------------------------------
+  INIT    | Initialize state when a different machine is assigned.
+  TRIG    | Start or retrigger the sound.
+  RENDER  | Generate the next 32 audio samples for the current track.
+
+When the machine changes, INIT runs before TRIG. RENDER runs every audio
+block, even without a new trigger. Parameter-only updates do not call
+TRIG. All three routines return with RTS.
+
+Retriggering:
+
+TRIG normally restarts the sound by resetting phase, envelope or other
+state, and the jump is heard as a click. With the ANTI-CLICK engine
+setting on, the firmware fades the previous sound out before calling
+TRIG, so the machine needs no anti-click code.
+
+Set CONTINUOUS RETRIGGER (MDM1 byte 6, bit 2) only if TRIG never makes
+the output jump. The firmware then calls TRIG at once, without the fade,
+which would itself cause a click.
+
+Panic stop:
+
+The device can silence every user machine at once. The track then stays
+silent until its next trigger, which runs INIT and then TRIG as for a
+newly assigned machine. The parameter values in Y:(R6+1)...Y:(R6+8) are
+kept.
+
+Input registers:
+
+  Routine | Register | Value on entry
+  --------+----------+---------------------------------------------------
+  All     | R6       | Start of this track's parameter and synthesis memory
+  INIT    | R1       | Track number, 0 to 15
+  RENDER  | R7       | Output address in Y memory (see Writing track audio)
+  RENDER  | M7       | $1F: circular addressing over 32 output words
+  RENDER  | M0...M5  | $FFFFFF: linear addressing
+
+R6 points to the track's 64-word X and Y memory (below), not to audio.
+R7 points to the output buffer. Audio input comes from imports, and
+neighbour audio from the buffers described below. Use these registers
+rather than fixed addresses. Registers not in the table are unspecified;
+set M6 yourself before using address updates on R6, since RENDER does
+not reset it.
+
+Register use:
+
+  Registers            | Rule
+  ---------------------+------------------------------------------------------
+  A, B, X0, X1, Y0, Y1 | Available for calculations; no restore required
+  R0...R7, N0...N7     | Available for addressing; no restore required
+  M0...M7              | May be changed; initialize those used by the routine
+  SR, MR, OMR          | Do not write or change processor/interrupt modes
+  SP, SSH, SSL         | Do not write directly; keep calls/returns balanced
+  LA, LC               | Use normal loop instructions; finish loops before RTS
+
+Keep persistent values in the track's X/Y memory, not registers between
+calls. Normal arithmetic updates to condition flags are allowed.
+Interrupts may occur during any routine; do not disable them.
+Do not use recursion, RTI, WAIT, STOP, RESET or software interrupts.
+
+Machine code must not write another track's memory, interrupt/peripheral
+registers, or program code. Access shared resources through the supported
+imports and obey their read/write permissions.
+
+Parameter and synthesis memory:
+
+Each track has separate 64-word regions in DSP X and Y data memory.
+Offsets below are relative to R6, not absolute addresses.
+
+  Memory     | Purpose
+  -----------+----------------------------------------------------------------
+  Y+0        | Reserved; do not modify
+  Y+1...Y+8  | Parameter values, converted using the selected value transforms
+  Y+9...Y+63 | Persistent synthesis data
+  X+0...X+63 | Persistent synthesis data
+
+This memory survives between audio blocks, for oscillator phase,
+envelope levels, filter history and similar state. INIT initializes what
+the machine needs, and the header's X/Y word counts limit how much it
+uses. For more memory, use track external memory or the RAM services.
+
+Exception: a STEREO PAIR machine reserves Y+9 for the host's read-only
+role word. Its persistent Y synthesis data starts at Y+10, and its
+declared Y workset must contain at least 10 words. Machines without
+STEREO PAIR retain the memory layout above.
+
+Parameter 0 is at Y:(R6+1), parameter 7 at Y:(R6+8). For example, AMP
+as parameter 0 with settings byte $21 (Percent, Unipolar Q23) arrives at
+Y:(R6+1) as $400000 (0.5) when set to 64.
+
+Parameter values can change at any time. Read them in RENDER if a
+control should affect a sound already playing, and don't store anything
+in these words.
+
+Track external memory:
+
+Each track has 1,536 words for delay lines or other persistent data.
+Import symbol 6 supplies the base for track 0: in INIT, add 1,536 times
+the track number in R1 and save the result in track memory. The region
+may hold another machine's data, so clear it before reading. Access only
+your own track's region.
+
+Shared temporary memory:
+
+Import symbols 7 and 8 supply 32-word X and Y scratch areas shared by
+all machines. Nothing survives between calls, so write before you read.
+See "Program relocation and imports" for how to declare these imports.
+
+Writing track audio:
+
+Each RENDER writes one mono block of 32 signed 24-bit samples, at
+44,100 Hz, to Y memory starting at R7. Always use the supplied R7
+address. Write all 32 words every time, zero for silence. The buffers
+are shared between tracks, so don't keep data in them, and don't write
+them from INIT or TRIG.
+
+3. Neighbour machines and stereo pairs
+=====================================
+
+Neighbour machines:
+
+Set NEIGHBOUR (MDM1 byte 6, bit 3) for a machine that processes the
+audio of up to four preceding tracks. This capability is independent of
+the machine's category.
+
+At the start of RENDER, four 32-word Y-memory buffers provide the audio
+of the four preceding tracks. Y:$07F0 holds the address of this track's
+descriptor: four words identifying the buffers.
+
+  Descriptor word | Buffer address
+  ----------------+---------------------------------------------------
+  +0              | This track's output (R7)
+  +1              | The track before (one back)
+  +2              | Two tracks back
+  +3              | Three tracks back
+
+Four tracks back is in the output buffer itself, until RENDER replaces
+it. For example:
+
+        move    y:$7f0,r5               ; this track's descriptor
+        move    #>$ffffff,m5
+        move    y:(r5+2),r1             ; two back
+        move    y:(r5+1),r5             ; one back
+
+Each input is 32 signed 24-bit samples, before any track effects. The
+four buffers are not next to each other, so give each its own pointer.
+An offset from another pointer also works if it doesn't wrap: M7 = $1F
+wraps R7 within its own buffer. The other three buffers are read-only.
+Write the result only to R7's buffer, after reading four back from it.
+
+Tracks render in order from 1 to 16. A track reads the four before it;
+where that goes past track 1, it reads the last tracks of the previous
+audio block. Track 1 reads tracks 13 to 16 from the previous block,
+track 2 reads track 1 and tracks 14 to 16, and so on; from track 5 all
+four are in the current block.
+
+A replaced neighbour machine's track stays silent until the new machine
+is triggered. CTR-AL does not change its synthesis parameters.
+
+Stereo pairs:
+
+Set STEREO PAIR (MDM1 byte 6, bit 4) together with NEIGHBOUR to receive
+automatic placement information. The authoring manifest uses
+"stereo_pair": true. This is optional and uses none of the eight controls.
+Firmware that does not support this flag rejects the package.
+
+The host scans tracks 1 through 16 and pairs adjacent instances of the
+same installed USR slot, taking each track at most once. The first is
+left, the second right. An unpaired instance is mono. A run of five
+instances becomes L, R, L, R, mono. Different slots do not pair, even
+when they hold identical packages. Track 16 does not pair with track 1.
+
+The host supplies the role at Y:(R6+9), before INIT and RENDER:
+
+  Value | Role  | Shared source for a neighbour effect
+  ------+-------+--------------------------------------
+      0 | Mono  | T-1
+      1 | Left  | T-1
+      2 | Right | T-2
+
+The source column is the convention for processing the track immediately
+before a pair. The machine selects and reads that neighbour buffer; the
+host does not mix the inputs or combine the two instances' state.
+
+Read the role in RENDER. Assigning, removing, replacing or moving a
+machine, or loading a kit, can change the role of an already-running
+instance without calling INIT. The host refreshes both affected tracks.
+Do not write Y+9, use it for synthesis state, or expose it as a parameter.
+For machines with fewer than eight controls, unused words through Y+8
+are sent as zero along with the role and must not hold synthesis state.
+
+Each instance still renders one mono block. Both instances share one
+installed program but have separate synthesis state and memory loans.
+Pan the two tracks apart for stereo; pairing does not change pan,
+parameter values, levels or output assignments, or trigger either track.
+
+4. Imports and services
+=======================
+
+Program relocation and imports:
+
+Relocation flags mark program addresses that the loader must adjust when
+placing the machine in memory. There is one bit per program word,
+least-significant bit first within each byte. A set bit adds the machine's
+assigned program base to that complete 24-bit word. Unused trailing bits
+are zero.
+
+An import tells the loader which complete program word to patch with
+the address of a firmware memory resource or service.
+
+The MDS1 header tells you where to find the import table:
+
+  Header bytes | Contains
+  -------------+-------------------------------------------------------
+  48...51      | Table start position, in bytes from the start of the file
+  24...25      | Number of four-byte import records to read
+
+For example, 512 and 2 mean two records, at bytes 512...515 and
+516...519.
+
+Each import record contains:
+
+  Bytes | Field            | Purpose
+  ------+------------------+-----------------------------------------------
+      2 | Program word     | Word to patch, counted from the program start
+      1 | Import kind      | Type of memory access; see below
+      1 | Symbol ID        | Memory resource to reference; see below
+
+List records in ascending program-word order. A program word can have
+either a local relocation or an import, not both.
+
+Supported imports:
+
+  Kind | Symbol | Memory resource                  | Size in DSP words
+  -----+--------+----------------------------------+------------------
+     1 |      1 | Built-in sine lookup table       | 32,768
+     1 |      2 | Stereo audio-input ring          | 256
+     1 |      3 | Audio-input position             | 1
+     1 |      4 | Main-output ring                 | 256
+     1 |      5 | Main-output position             | 1
+     2 |      6 | Track external memory base       | 1,536 per track
+     3 |      7 | Shared X temporary memory        | 32
+     4 |      8 | Shared Y temporary memory        | 32
+     5 |      9 | SAMPLE_INFO callable service     | Entry only
+     5 |     10 | SAMPLE_READ callable service     | Entry only
+     5 |     11 | RAM_WORKSPACE callable service   | Entry only
+     5 |     12 | RAM_RECORD callable service      | Entry only
+
+Import example machines are in machines/examples/imports/.
+
+Import kinds:
+
+  Kind | Access allowed
+  -----+--------------------------------------------------------------
+     1 | Read X memory only
+     2 | Read and write external memory (X and Y are the same storage)
+     3 | Read and write X temporary memory
+     4 | Read and write Y temporary memory
+     5 | Call a firmware service
+
+For kinds 1 to 4, the patched word holds an offset in DSP words, and the
+loader adds the resource's start address to it. Negative or out-of-range
+offsets are rejected. For symbol 6, this offset is within track 0's
+region; select the current track as described under "Track external
+memory".
+
+External audio input:
+
+Symbol 2 is the base address of a read-only 256-word ring holding the
+audio inputs, one pair of words per sample: input A, then input B.
+Symbol 3 identifies an X-memory word containing the current position in
+the ring. Read that word to obtain the position; symbol 3 does not point
+to sample data.
+
+  - In INIT, read symbol 3's word and keep the position in track memory.
+  - In each RENDER, start 96 words before the saved position and read 32
+    pairs, then advance the saved position by 64 words. Both wrap within
+    the ring; M=$FF gives the circular addressing.
+  - Never write to the ring or its position word.
+
+Reading the main output:
+
+Symbol 4 is the base address of a read-only 256-word ring containing
+main-output audio, arranged as one pair of words per sample. Symbol 5
+identifies an X-memory word containing the address of the block to read
+in this RENDER. Read that word to obtain the block address; symbol 5
+does not point to sample data.
+
+  - In each RENDER, read symbol 5's word and take the 64 consecutive
+    words at that address: 32 pairs, one per sample. A block never wraps.
+  - The supplied block advances once per frame and stays unchanged
+    during RENDER. Track 1 receives each block one frame later than
+    tracks 2 to 16.
+  - The block is main output from earlier frames and lags the tracks' own
+    output. A machine whose output reaches the main mix while it reads
+    that mix forms a feedback loop.
+  - Never write to the ring or its position word.
+
+Calling services:
+
+To call a service (kind 5), write the two-word JSR >address with an
+address word of zero, and point the import at that word. The loader
+writes the service's entry address there; a nonzero word is rejected.
+Services return with RTS.
+
+Services preserve X0, Y0, R6, R7, M6 and M7 and may change any other
+register, including the condition codes. They leave calls and hardware
+loops balanced and interrupts enabled.
+
+The sample services need Capability Reply feature bit 0, and the RAM
+services need bit 1 (see MDX_MachineDumpProtocol.txt). Firmware that does
+not support a symbol rejects the package.
+
+Service costs:
+
+A machine's declared cost includes the services it calls, but their
+code is in the firmware, not in the package. Add these figures to the
+cost of your own code instead of simulating them. Each is the most one
+call can take, in the same clock cycles as the per-track limit, from the
+JSR to the return:
+
+  Service       | Most clock cycles per call
+  --------------+--------------------------------------------------------
+  SAMPLE_INFO   | 149
+  SAMPLE_READ   | 202 + 33 per requested frame (N0): 1,258 for 32 frames
+  RAM_WORKSPACE | 140
+  RAM_RECORD    | 180 to start a recording
+                | 272 + 55 per frame added (N0): 2,032 for 32 frames
+
+The figures cover every supported bank, slot, position, frame value and
+hardware model. A call that is refused or returns zeros costs less. For
+example, a machine that calls SAMPLE_READ for 32 frames in every RENDER
+needs 1,258 of its 3,951 cycles for that call alone.
+
+Sample access:
+
+SAMPLE_INFO and SAMPLE_READ give read-only access to the samples in the
+current sample bank. The samples are not part of the MDS package, and a
+machine needs no sample addresses, formats or decoding of its own:
+SAMPLE_READ returns plain PCM.
+
+  Input | Meaning
+  ------+---------------------------------------------------------------
+  X0    | Bank: 0 = INTERNAL, 1 = USERWAVE, 2 = RAM
+  Y0    | Zero-based slot within that bank
+
+INTERNAL exposes the 21 internal sample/layer slots, including user
+replacements. USERWAVE exposes the loaded UW ROM slots: 32 on MKI UW,
+48 on MKII UW, unavailable on non-UW hardware. RAM exposes the RAM
+recording slots R1...R4 on MKII UW and R1...R2 on MKI UW (feature bit 1;
+see "RAM slots"). Other banks are reserved.
+
+SAMPLE_INFO returns:
+
+  Output | Meaning
+  -------+--------------------------------------------------------------
+  A1     | Length in mono sample frames; zero if unavailable or invalid
+  B1     | Native playback step in unsigned Q16.16 frames per output sample
+  X1     | Loop-start frame, or $FFFFFF when no loop is supplied
+
+A native step of $010000 is one source frame per 44,100-Hz output
+sample, the rate of all INTERNAL samples. On failure, A1=B1=0 and
+X1=$FFFFFF; an empty INTERNAL slot plays silence.
+
+The services only describe and read samples. The machine does the
+playing, including pitch, interpolation, start and end points and looping.
+
+SAMPLE_READ takes the same X0/Y0 selection and:
+
+  Input       | Meaning
+  ------------+---------------------------------------------------------
+  N0          | Number of requested frames, 1...32
+  Y:$00...$1F | Signed 24-bit integer source-frame positions
+
+It writes 32 words of signed Q23 linear PCM to X:$00...$1F, one for each
+requested position, and leaves the positions unchanged. Positions can be
+in any order and can repeat.
+
+  - Negative or out-of-range positions, and words beyond N0, read as zero.
+  - A1=1 when the bank, slot and N0 are valid, even if every position
+    was out of range.
+  - A1=0 when they are not, or the slot's sample is invalid. The whole
+    block is then zero.
+
+A machine that imports SAMPLE_READ may use both 32-word temporary areas,
+X:$00...$1F and Y:$00...$1F, for these calls. They don't keep their
+contents between calls: copy what you need into the track's own memory
+before returning. RENDER must still write all 32 words of its output
+buffer.
+
+Services can be called from INIT, TRIG or RENDER. Count their cost in
+the machine's cycle budget (see "Service costs").
+
+For one-shot playback, call SAMPLE_INFO in TRIG and keep the length and
+step in the track's memory. RENDER then only needs SAMPLE_READ. If
+SAMPLE_READ returns A1=0, stop the voice until the next trigger.
+
+Call SAMPLE_INFO again at every TRIG; don't reuse values from an earlier
+trigger. A sample can change while a voice is playing, for example when
+a new bank is loaded. SAMPLE_READ always reads what is in the slot now,
+so the playing voice may briefly play the new sample at the old length
+and rate, or go silent. The next trigger plays the new sample correctly.
+
+For example, to play the first 32 frames of INTERNAL slot 7 in RENDER,
+write positions 0...31 to Y:$00...$1F, set X0=0, Y0=7 and N0=32, call
+SAMPLE_READ (symbol 10), and copy X:$00...$1F to Y:(R7)+. For USERWAVE,
+set X0=1.
+
+RAM slots:
+
+UW units have recording slots R1...R4 on MKII and R1...R2 on MKI.
+SAMPLE_INFO, SAMPLE_READ and RAM_RECORD provide access to recordings;
+RAM_WORKSPACE provides temporary use of an empty slot's memory (feature
+bit 1). Non-UW units have no RAM slots, and these services return zeros.
+
+  - The slots share equally the sample memory that the UW sample bank
+    leaves free: the fewer UW samples loaded, the bigger each slot.
+  - Loading a sample bank empties the slots and may change their capacity.
+  - A slot holds its last recording. Its length grows while it records.
+  - Use SAMPLE_READ to read recordings as signed Q23 linear PCM.
+
+To play a slot, use SAMPLE_INFO and SAMPLE_READ with bank 2 and slot
+0...3 (R1...R4), as for USERWAVE. SAMPLE_INFO returns the current length
+(zero while empty, growing while it records), native step and loop
+start. SAMPLE_READ returns the frames recorded so far; later positions
+read as zero.
+
+RAM_RECORD records into a slot. Recordings can be played by SAMPLE_READ
+and the built-in RAM playback machines. It uses both 32-word temporary
+areas, as SAMPLE_READ does. Adding 32 frames costs up to 2,032 clock
+cycles, about half the per-track limit (see "Service costs").
+
+  Input        | Meaning
+  -------------+--------------------------------------------------------
+  X0           | RAM slot: 0...3 (R1...R4)
+  N0           | 0 to start a recording; 1...32 to add that many frames
+  Y0           | When starting: the recording's native step, unsigned
+               | Q16.16 frames per 44,100-Hz output sample, $000001...
+               | $010000 (as SAMPLE_INFO returns it)
+  X:$00...$1F  | When adding: the frames, signed Q23 linear PCM
+
+  Output | Meaning
+  -------+--------------------------------------------------------------
+  A1     | The recording's length in frames after the call
+  B1     | Frames it still has room for
+  A1, B1 | Both zero: no recording (refused, or it has ended)
+
+Starting (N0=0) claims the slot for the calling track. The old recording
+is gone; the new one has length zero, no loop and the native step given
+in Y0. B1 returns the slot's capacity.
+To fit a longer duration into the slot, start again with a lower step.
+
+Adding frames (N0=1...32) appends them after the frames recorded so far.
+The new length is published only after the frames are stored. Frames beyond the capacity are dropped; a full recording returns
+its length and zero room.
+
+Clearing the slot or loading a sample bank stops the recording. Adding
+frames then returns zeros until the track starts a new recording.
+
+The last start wins. Once another track starts recording into the slot,
+the earlier track's calls are refused; the recording belongs to the new
+owner. This also applies when a built-in recording machine claims the slot.
+
+RAM_WORKSPACE lends a slot's memory to a machine that needs more than
+its 1,536 words of track external memory, such as a long delay or a
+reverb. A slot is lent only while it holds no recording. Starting a
+recording ends the loan; clearing the slot makes it available again.
+
+  Input | Meaning
+  ------+---------------------------------------------------------------
+  X0    | RAM slot: 0...3 (R1...R4)
+
+  Output | Meaning
+  -------+--------------------------------------------------------------
+  A1     | First external word of the lent memory; zero if none
+  B1     | Number of words; zero if none
+
+The lent words are external memory, where X and Y are the same storage.
+
+  - Call RAM_WORKSPACE once in every RENDER, and use the memory only in
+    that block. When it returns zeros, write no further words there.
+  - The memory may hold old data, and its address and size can change.
+    Clear what you use whenever you gain it or the address changes.
+
+Each slot is lent to one track at a time. Another track asking for it
+gets zeros until it has made sixteen calls with none from the holder,
+more than the other tracks can make in one frame. A holder that calls
+every frame keeps the memory, and a replaced machine releases it
+automatically.
+
+5. JSON source definition
+=========================
+
+Use one JSON file alongside the assembly source: sine.json for
+sine.asm56k. It describes the machine and how to package its program.
+The JSON itself is not sent to the instrument.
+
+A sine generator definition:
+
+  {
+    "id": "org.example.sine",
+    "display_name": "SINE",
+    "category": "GND",
+    "short_label": "SI",
+    "tonal": true,
+    "params": [
+      { "name": "PTCH", "default": 64, "transform": "pitch" },
+      { "name": "AMP", "default": 100, "transform": "unipolar_q23" }
+    ],
+    "program": {
+      "y_workset_words": 12,
+      "relocations": ["MDS_SINE_BLOCK_LOOP"],
+      "imports": [
+        { "symbol": "MDS_SINE_TABLE_READ", "abi_symbol": 1 }
+      ]
+    }
+  }
+
+Required fields are id, display_name, category, short_label and program.
+Their limits follow the machine description in section 1. Optional
+category_order is an integer from 1 to 254; omission or zero means
+unspecified. For example, use 10, 20 and 30 to leave room for later
+additions between machines. It is independent of the destination USR slot.
+Optional
+machine_version is a string such as "1.2"; it defaults to "0.0".
+The format and ABI default to version 1, so schema and abi_version
+need not be written. tonal, neighbour and stereo_pair default to false;
+retrigger defaults to "restart". Set these flags only as appropriate for
+the machine's behavior described in sections 2 and 3.
+
+params is an ordered list of up to eight controls; omit it for none.
+Each control requires name and transform. default and min default to 0;
+max defaults to 127, except boolean defaults to 1. Supply nondefault
+bounds and values explicitly. control defaults according to transform:
+
+  Transform             | Control
+  ----------------------+------------
+  raw14                 | continuous
+  unipolar_q23          | percent
+  unipolar_square_q23   | percent
+  bipolar_q23          | bipolar
+  pitch                 | pitch
+  boolean               | switch
+  index                 | rotary
+  decay                 | continuous
+
+An explicit control must be compatible with its transform. linked defaults
+to false; value_text may supply display labels as described in section 1.
+Optional description supplies text for machine lists; it is not a field
+in the installed machine description.
+
+program fields:
+
+  init_symbol, trig_symbol, render_symbol
+    Assembly entry labels; default to INIT, TRIG and RENDER.
+
+  x_workset_words, y_workset_words
+    Per-track memory used, from 0 to 64 words each; both default to zero.
+    Include the parameter area and all persistent state. A machine with
+    controls needs at least 1 + the control count in Y memory; stereo_pair
+    needs at least 10 Y words. See sections 2 and 3 for the memory layout.
+
+  relocations
+    Labels marking local program addresses that need relocation.
+    A string is shorthand for { "symbol": "LABEL", "word_delta": 1 }.
+    Use an object when the address word is at another offset from the label.
+
+  imports
+    Objects containing symbol (an assembly label) and abi_symbol (the
+    numeric service or resource in section 4). word_delta defaults to 1.
+    kind follows the ABI symbol; if supplied, it must agree with section 4.
+
+Both lists default to empty. word_delta is a signed offset in program
+words from the label to the address word to patch, not a resource offset.
+An omitted offset selects the word immediately after the labelled
+instruction. Imported resource offsets remain in that operand; function
+call operands must be zero, as described in section 4.
+
+max_track_cycles is an optional cycle declaration. Omission means zero,
+a draft package that cannot be installed. An installable package must
+carry a valid worst-case bound as described under Per-track cycle budget
+in section 1. Changing source requires checking that bound again.

@@ -1,0 +1,8 @@
+; SMP-U1: trigger a UW ROM slot, using SAMPLE_INFO's native playback rate.
+BANK_ID equ 1
+REVERSE equ 0
+P_SLOT  equ 1
+P_START equ 2
+P_DEC   equ 3
+P_LEVEL equ 4
+        include "sample_player.inc"

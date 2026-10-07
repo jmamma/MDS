@@ -1,0 +1,58 @@
+{
+  "id": "org.spsx.example.main-rec",
+  "display_name": "MAIN REC",
+  "description": "records the main output into a RAM slot (UW only)",
+  "category": "EX",
+  "short_label": "MR",
+  "params": [
+    {
+      "name": "SLOT",
+      "default": 1,
+      "min": 1,
+      "max": 4,
+      "transform": "index",
+      "value_text": [
+        {
+          "value": 1,
+          "text": "R1"
+        },
+        {
+          "value": 2,
+          "text": "R2"
+        },
+        {
+          "value": 3,
+          "text": "R3"
+        },
+        {
+          "value": 4,
+          "text": "R4"
+        }
+      ]
+    }
+  ],
+  "program": {
+    "y_workset_words": 10,
+    "relocations": [
+      "MONO_LOOP"
+    ],
+    "imports": [
+      {
+        "symbol": "START",
+        "abi_symbol": 12
+      },
+      {
+        "symbol": "MAIN_POSITION",
+        "abi_symbol": 5
+      },
+      {
+        "symbol": "FRAMES",
+        "abi_symbol": 7
+      },
+      {
+        "symbol": "ADD",
+        "abi_symbol": 12
+      }
+    ]
+  }
+}

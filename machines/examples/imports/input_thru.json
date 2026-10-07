@@ -1,0 +1,50 @@
+{
+  "id": "org.spsx.example.input-thru",
+  "display_name": "INPUT THRU",
+  "description": "input A or B",
+  "category": "EX",
+  "short_label": "IN",
+  "retrigger": "continuous",
+  "params": [
+    {
+      "name": "SIDE",
+      "max": 1,
+      "transform": "index",
+      "value_text": [
+        {
+          "value": 0,
+          "text": "A"
+        },
+        {
+          "value": 1,
+          "text": "B"
+        }
+      ]
+    },
+    {
+      "name": "LEV",
+      "default": 100,
+      "transform": "unipolar_q23"
+    }
+  ],
+  "program": {
+    "y_workset_words": 10,
+    "relocations": [
+      "RENDER_LOOP"
+    ],
+    "imports": [
+      {
+        "symbol": "INPUT_POSITION",
+        "abi_symbol": 3
+      },
+      {
+        "symbol": "INIT_RING",
+        "abi_symbol": 2
+      },
+      {
+        "symbol": "INPUT_RING",
+        "abi_symbol": 2
+      }
+    ]
+  }
+}

@@ -1,0 +1,59 @@
+; INPUT THRU: plays external input A or B, as the stock INP-A and INP-B do.
+;
+; Imports (input_thru.json):
+;   INPUT_POSITION  kind 1, symbol 3: the word holding the input position
+;   INPUT_RING      kind 1, symbol 2: the first word of the 256-word input ring
+;
+; The ring holds one pair a sample: input A, then input B. Symbol 3's word
+; is the address in the ring where the input is now. Each block reads 32
+; pairs starting 96 words (48 pairs) behind that position, then moves on
+; 64 words (32 pairs). This machine keeps its position as an offset in the
+; ring, 0...255, and uses symbol 2 to turn the offset into an address.
+;
+; Y:(r6+1) SIDE: 0 input A, 1 input B (the second word of each pair)
+; Y:(r6+2) LEV: output level, unipolar Q23
+; Y:(r6+9) this track's position, as an offset in the ring
+
+        section INPUT_THRU
+
+INIT:
+        movec   #>$ffffff,m6
+INPUT_POSITION:
+        move    x:>$000000,a            ; symbol 3: where the input is now
+INIT_RING:
+        move    #>$000000,x0            ; symbol 2: the ring's first word
+        sub     x0,a                    ; the position as an offset in the ring
+        move    a1,y:(r6+9)
+        rts
+
+TRIG:
+        rts                             ; the input plays all the time
+
+RENDER:
+        movec   #>$ffffff,m6
+        move    y:(r6+9),a              ; this block's position
+        sub     #>96,a                  ; read 96 words (48 pairs) behind it
+        move    y:(r6+1),x0
+        add     x0,a                    ; input B is the second word of a pair
+        and     #>$ff,a                 ; wrap inside the ring
+INPUT_RING:
+        move    #>$000000,x0            ; symbol 2: the ring's first word
+        add     x0,a
+        move    a1,r0
+        movec   #>$ff,m0                ; reads wrap at the ring's end too
+        move    #2,n0                   ; one pair a sample
+        move    y:(r6+2),y0             ; LEV
+RENDER_LOOP:
+        do      #32,RENDER_END
+        move    x:(r0)+n0,x0
+        mpy     x0,y0,a
+        move    a,y:(r7)+
+RENDER_END:
+        movec   #>$ffffff,m0
+        move    y:(r6+9),a              ; the next block is 32 pairs on
+        add     #>64,a
+        and     #>$ff,a
+        move    a1,y:(r6+9)
+        rts
+
+        endsec

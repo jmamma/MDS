@@ -1,0 +1,70 @@
+; MAIN REC: records the main output into a RAM slot, as a RAM-R machine does.
+;
+; Imports (main_rec.json):
+;   START, ADD     kind 5, symbol 12: RAM_RECORD
+;   MAIN_POSITION  kind 1, symbol 5: the word holding this block's address
+;   FRAMES         kind 3, symbol 7: X temporary memory, 32 words
+;
+; A trigger starts a recording into slot SLOT: X0 = the slot, N0 = 0 and
+; Y0 = the native step, $010000 for one frame every output sample. Every
+; block after that puts the 32 newest main-output samples, mono, into X
+; temporary memory and adds them: N0 = 32. Each call returns the length in
+; A1 and the room left in B1. Recording stops when B1 is zero: the slot is
+; full, or another track (or a RAM-R machine) has started recording into
+; it. The next trigger starts again. Play the recording with RAM HIT or a
+; stock RAM-P machine. Units without RAM slots return zeros: nothing records.
+;
+; RAM_RECORD keeps X0, Y0, R6, R7, M6 and M7; every other register may change.
+;
+; Y:(r6+1) SLOT: R1...R4 as 0...3
+; Y:(r6+9) nonzero while recording
+
+        section MAIN_REC
+
+INIT:
+        movec   #>$ffffff,m6
+        clr     a
+        move    a,y:(r6+9)
+        rts
+
+TRIG:
+        movec   #>$ffffff,m6
+        move    y:(r6+1),x0             ; the slot
+        move    #>$010000,y0            ; one frame every output sample
+        move    #0,n0                   ; start a recording
+START:
+        jsr     >$000000                ; symbol 12: RAM_RECORD
+        move    b1,y:(r6+9)             ; the room: zero if it was refused
+        rts
+
+RENDER:
+        movec   #>$ffffff,m6
+        clr     a
+        rep     #32
+        move    a,y:(r7)+               ; this machine plays nothing itself
+        move    y:(r6+9),a
+        tst     a
+        beq     <DONE
+MAIN_POSITION:
+        move    x:>$000000,r0           ; symbol 5: this block's main output
+        movec   #>$ffffff,m0
+FRAMES:
+        move    #>$000000,r1            ; symbol 7: X temporary memory
+        movec   #>$ffffff,m1
+MONO_LOOP:
+        do      #32,MONO_END
+        move    x:(r0)+,a               ; the first word of the pair
+        move    x:(r0)+,x0              ; the second word
+        add     x0,a                    ; mono: their average
+        asr     a
+        move    a,x:(r1)+
+MONO_END:
+        move    y:(r6+1),x0             ; the slot
+        move    #32,n0                  ; add 32 frames
+ADD:
+        jsr     >$000000                ; symbol 12: RAM_RECORD
+        move    b1,y:(r6+9)             ; stop when there is no room left
+DONE:
+        rts
+
+        endsec

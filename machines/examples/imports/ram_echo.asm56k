@@ -1,0 +1,137 @@
+; RAM ECHO: an echo on the track before, in a RAM slot's memory.
+;
+; Import (ram_echo.json):
+;   WORKSPACE  kind 5, symbol 11: RAM_WORKSPACE
+;
+; A track's own 1,536 words hold only 35 ms of audio. RAM_WORKSPACE lends a
+; RAM slot's memory while the slot holds no recording: call it in every
+; RENDER with X0 = the slot. It returns the first word in A1 and the number
+; of words in B1, or zeros. On zeros, write nothing there and play dry.
+;
+; The echo is a 32,768-word ring (0.74 s), placed at the first multiple of
+; 32,768 in the lent memory so that modulo addressing (M = $7FFF) can wrap
+; it. The memory is not cleared for the machine, and can move: whenever
+; the ring is new, the machine clears it, 1,024 words a block (23 ms in
+; all), playing dry meanwhile.
+;
+; RAM_WORKSPACE keeps X0, Y0, R6, R7, M6 and M7; every other register may
+; change, so the neighbour buffer is looked up after the call.
+;
+; Y:(r6+1) SLOT: R1...R4 as 0...3
+; Y:(r6+2) TIME: the delay, 0...1 of the ring
+; Y:(r6+3) FB: feedback, unipolar Q23
+; Y:(r6+4) MIX: echo level, unipolar Q23
+; Y:(r6+9)  the ring's first word; zero for none
+; Y:(r6+10) words of the ring cleared so far
+; Y:(r6+11) the write position, as an offset in the ring
+
+RING    equ     $8000                   ; 32,768 words
+CHUNK   equ     1024                    ; words cleared a block
+
+        section RAM_ECHO
+
+INIT:
+        movec   #>$ffffff,m6
+        clr     a
+        move    a,y:(r6+9)
+        move    a,y:(r6+10)
+        move    a,y:(r6+11)
+        rts
+
+TRIG:
+        rts                             ; an effect: it runs all the time
+
+RENDER:
+        movec   #>$ffffff,m6
+        move    y:(r6+1),x0             ; the slot
+WORKSPACE:
+        jsr     >$000000                ; symbol 11: RAM_WORKSPACE
+        tst     a
+        beq     <FORGET                 ; no memory this block
+        ; The ring: the first multiple of 32,768 in the lent words.
+        add     a,b                     ; the end of the lent words
+        add     #>RING-1,a
+        and     #>$ff8000,a
+        move    a1,y1                   ; the ring's first word
+        add     #>RING,a
+        cmp     b,a
+        bgt     <FORGET                 ; not enough memory for the ring
+        move    y:(r6+9),a
+        cmp     y1,a
+        beq     <KNOWN
+        move    y1,y:(r6+9)             ; a new ring: clear it first
+        clr     a
+        move    a,y:(r6+10)
+        move    a,y:(r6+11)
+KNOWN:
+        move    y:(r6+10),a
+        cmp     #>RING,a
+        bge     <ECHO
+
+        ; Clear the next 1,024 words, and play dry meanwhile.
+        add     y1,a
+        move    a1,r0
+        movec   #>$ffffff,m0
+        clr     a
+        rep     #CHUNK
+        move    a,y:(r0)+
+        move    y:(r6+10),a
+        add     #>CHUNK,a
+        move    a1,y:(r6+10)
+        bra     <DRY
+
+FORGET:
+        clr     a
+        move    a,y:(r6+9)              ; clear the ring again when it is back
+DRY:
+        move    y:$7f0,r5               ; this track's neighbour descriptor
+        movec   #>$ffffff,m5
+        move    y:(r5+1),r5             ; the track before
+DRY_LOOP:
+        do      #32,DRY_END
+        move    y:(r5)+,a
+        move    a,y:(r7)+
+DRY_END:
+        rts
+
+ECHO:
+        movec   #>RING-1,m0             ; both pointers wrap inside the ring
+        movec   #>RING-1,m1
+        move    y:(r6+11),a             ; the write position
+        add     y1,a
+        move    a1,r0
+        move    y:(r6+2),x0             ; TIME
+        move    #>RING-1,y0
+        mpy     x0,y0,b                 ; the delay, 0...32,767 samples
+        add     #1,b                    ; at least one
+        move    b1,x0                   ; (whole samples only)
+        move    y:(r6+11),a
+        sub     x0,a                    ; the read position: the delay behind
+        and     #>RING-1,a
+        add     y1,a
+        move    a1,r1
+        move    y:$7f0,r5               ; this track's neighbour descriptor
+        movec   #>$ffffff,m5
+        move    y:(r5+1),r5             ; the track before
+        move    y:(r6+3),y1             ; FB
+        move    y:(r6+4),x1             ; MIX
+ECHO_LOOP:
+        do      #32,ECHO_END
+        move    y:(r5)+,x0              ; the input
+        move    y:(r1)+,y0              ; the echo: the delay ago
+        move    x0,a
+        mac     y0,x1,a                 ; out: the input plus MIX x the echo
+        move    a,y:(r7)+
+        move    x0,a
+        mac     y0,y1,a                 ; in: the input plus FB x the echo
+        move    a,y:(r0)+
+ECHO_END:
+        move    r0,a                    ; keep the write position
+        move    y:(r6+9),x0
+        sub     x0,a
+        move    a1,y:(r6+11)
+        movec   #>$ffffff,m0
+        movec   #>$ffffff,m1
+        rts
+
+        endsec

@@ -1,0 +1,9 @@
+; SMP-R1: read decreasing positions from either logical sample bank.
+BANK_ID equ -1
+REVERSE equ 1
+P_BANK  equ 1
+P_SLOT  equ 2
+P_START equ 3
+P_DEC   equ 4
+P_LEVEL equ 5
+        include "sample_player.inc"

@@ -1,0 +1,36 @@
+{
+  "id": "org.spsx.example.main-tap",
+  "display_name": "MAIN TAP",
+  "description": "the main output, mono: route this track away from it",
+  "category": "EX",
+  "short_label": "MT",
+  "retrigger": "continuous",
+  "params": [
+    {
+      "name": "BACK",
+      "max": 2,
+      "transform": "index"
+    },
+    {
+      "name": "LEV",
+      "default": 32,
+      "transform": "unipolar_q23"
+    }
+  ],
+  "program": {
+    "y_workset_words": 3,
+    "relocations": [
+      "RENDER_LOOP"
+    ],
+    "imports": [
+      {
+        "symbol": "MAIN_POSITION",
+        "abi_symbol": 5
+      },
+      {
+        "symbol": "MAIN_RING",
+        "abi_symbol": 4
+      }
+    ]
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "id": "org.spsx.usr.sine",
+  "display_name": "SINE",
+  "category": "GND",
+  "short_label": "SI",
+  "tonal": true,
+  "params": [
+    {
+      "name": "PTCH",
+      "default": 64,
+      "transform": "pitch"
+    },
+    {
+      "name": "AMP",
+      "default": 100,
+      "transform": "unipolar_q23"
+    }
+  ],
+  "program": {
+    "y_workset_words": 12,
+    "relocations": [
+      "MDS_SINE_BLOCK_LOOP"
+    ],
+    "imports": [
+      {
+        "symbol": "MDS_SINE_TABLE_READ",
+        "abi_symbol": 1
+      }
+    ]
+  }
+}
