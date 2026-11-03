@@ -1,5 +1,5 @@
 {
-  "id": "org.spsx.demo.ram-hit",
+  "id": "org.mdx.demo.ram-hit",
   "display_name": "RAM HIT",
   "description": "plays what a RAM slot holds (UW only)",
   "category": "SMP",

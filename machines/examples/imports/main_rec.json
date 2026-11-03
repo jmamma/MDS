@@ -1,5 +1,5 @@
 {
-  "id": "org.spsx.example.main-rec",
+  "id": "org.mdx.example.main-rec",
   "display_name": "MAIN REC",
   "description": "records the main output into a RAM slot (UW only)",
   "category": "EX",
@@ -44,6 +44,10 @@
       {
         "symbol": "MAIN_POSITION",
         "abi_symbol": 5
+      },
+      {
+        "symbol": "MAIN_RING",
+        "abi_symbol": 4
       },
       {
         "symbol": "FRAMES",
