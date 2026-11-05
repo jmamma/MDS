@@ -1,0 +1,76 @@
+* MDS changelog *
+-----------------
+
+Changes to the MDS specification and Machine Dump Protocol.
+Dates refer to document revisions.
+
+2026-10-23
+==========
+
+MDS version 1.1
+
+Packages now store version 1.1 as $01 $01 in bytes 4...5. Version 1.0
+packages, which store $00 $01, still install.
+A 1.1 package gives all three cycle counts below.
+
+Cycle counts per board
+
+The MDS package header now stores separate cycle counts for MKI and
+MKII. They include instruction cycles, memory waits and calls to MDS
+services, but not dispatch work, which the firmware already accounts
+for.
+
+New certifications must give all three counts, each nonzero:
+
+  - MKII: header bytes 70...71.
+
+  - MKI with the program in DRAM: bytes 72...73.
+
+  - MKI with the program in SRAM: bytes 74...75.
+
+Measure them with a certifier that accurately simulates each board.
+Newly certified machines require firmware that reports capability bit 5.
+
+DSP admission
+
+When a USR Machine is assigned, the MDX firmware adds up the declared
+cycles and firmware charges of every track in the Kit, then checks that
+the Kit stays within the DSP limit. A machine on several tracks counts
+once per track.
+
+Sixteen tracks of one machine fit when its declared cycles per track are
+at most 3,073 on MKI and 3,000 on MKII. There is no limit per track or
+machine.
+
+Updated service costs
+
+A service's published cost includes the calling JSR through the return;
+count it once. With memory waits:
+
+  - SAMPLE_READ: 487 + 41 per requested frame (1,799 for 32 frames).
+
+  - SAMPLE_INFO: 328.
+
+  - RAM_WORKSPACE: 403.
+
+  - RAM_RECORD: 572 to start, or 1,045 + 59 per appended frame.
+
+Machines certified with older service costs should be certified again.
+
+Trigger information and Tempo conversion
+
+  - TRIGGER_INFO (import symbol 13) lets TRIG distinguish retrigger
+    repeats from other triggers using bit 16. Requires capability bit 3.
+
+  - Tempo parameter conversion ($08) provides a length in samples that
+    follows the tempo. Requires capability bit 4.
+
+Machine Dump Protocol
+
+  - Capability Reply contains 34 bytes and reports the device's DSP
+    limit in clock cycles.
+
+  - Hosts should read the number of slots from Capability Reply instead
+    of assuming 16. +Drive Machine Banks have 48.
+
+The packaging tools and certifier write version 1.1.

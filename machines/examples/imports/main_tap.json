@@ -1,5 +1,5 @@
 {
-  "id": "org.spsx.example.main-tap",
+  "id": "org.mdx.example.main-tap",
   "display_name": "MAIN TAP",
   "description": "the main output, mono: route this track away from it",
   "category": "EX",

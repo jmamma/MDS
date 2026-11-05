@@ -1,16 +1,22 @@
 * Machine Dump Standard (MDS) *
 --------------------------------
 
-MDS version 1
+MDS version 1.1
+
+Revision history: Changelog.
 
 MDS defines the .mds file format for user machines that run on the
 Machinedrum's DSP56303 digital signal processor.
 
 To install a machine, encode its .mds file as a MIDI Sysex (.syx) file
-and send it to the Machinedrum. See MDX_MachineDumpProtocol.txt for
-the encoding and transfer protocol.
+and send it to the Machinedrum. See the Machine Dump Protocol
+(MDX_MachineDumpProtocol.txt) for encoding and transfer details.
 
-MDS version 1 is supported by Machinedrum OS X.20.
+MDS version 1.1 requires the separate MKI and MKII cycle counts. The
+firmware accepts version 1.0 and 1.1 packages.
+Smaller additions do not change the version: a Capability Reply feature
+bit announces each one (see MDX_MachineDumpProtocol.txt). Firmware
+without a feature rejects a package that uses it.
 
 Numbers prefixed with $ or 0x are hexadecimal. Other numbers are decimal.
 
@@ -67,7 +73,7 @@ Offsets count bytes from the package start (the "M" in "MDS1").
 -------------------------------------------------------------
   Format
        0 |     4 | "MDS1"
-       4 |     2 | MDS version: 1
+       4 |     2 | MDS version: $01 $01 (1.1)
        6 |     2 | Header size: 128
        8 |     4 | Complete package size, including padding
       12 |     4 | Flags: zero
@@ -97,9 +103,10 @@ Offsets count bytes from the package start (the "M" in "MDS1").
       66 |     2 | TRIG routine offset (DSP words)
       68 |     2 | RENDER routine offset (DSP words)
   Cycle budget
-      70 |     2 | Declared maximum per-track clocks; zero is not installable
+      70 |     2 | MKII cycles per track; required, nonzero
+      72 |     2 | MKI cycles per track; required, nonzero
+      74 |     2 | MKI cycles per track, program in SRAM; required, nonzero
   Verification
-      72 |     4 | Reserved, zero
       76 |     4 | Decoded program CRC-32
       80 |     4 | Machine-description CRC-32
       84 |     4 | Complete package CRC-32
@@ -111,6 +118,9 @@ Machine version is the author's own release number, separate from the
 MDS version: bytes 30=$01, 31=$02 mean 1.2, and 0.0 means unspecified.
 It is only displayed; the firmware never acts on it.
 
+Byte 4 holds the MDS major version and byte 5 the minor. Version 1.0
+packages store $00 $01.
+
 CRCs use the standard reflected CRC-32 polynomial $EDB88320, with an
 initial value of $FFFFFFFF and final XOR of $FFFFFFFF. The program CRC
 covers the program bytes, and the description CRC covers the whole
@@ -120,26 +130,126 @@ the whole package with bytes 84 to 87 treated as zero.
 Calculate the content ID as SHA-256 of the package with bytes 84 to 119
 zeroed, followed by the decoded program bytes. Store it in bytes 88...119.
 
-Per-track cycle budget:
+Cycles per track:
 
-Header bytes 70...71 report the machine's worst-case runtime cost: the
-most clock cycles it can use for one 32-sample block on one track.
-Include:
+A package stores three cycle counts, each for one 32-sample block on one
+track. New certifications must give all three, each nonzero, with the
+MKI SRAM count no higher than the MKI DRAM count:
 
-  - the fixed firmware dispatch overhead per track
-  - TRIG plus RENDER together, for a block in which the track is triggered
+  Cycle count           | Header bytes
+  ----------------------+-------------
+  MKII                  | 70...71
+  MKI, program in DRAM  | 72...73
+  MKI, program in SRAM  | 74...75
+
+Each count covers the machine's worst cost for that model and memory
+placement: its routines, its imported service calls (see "Service costs")
+and its memory wait states. Include:
+
+  - INIT, TRIG and RENDER together, for a block that initializes and
+    triggers the machine, including its first trigger after assignment;
+    several tracks may do this in the same block
+  - TRIG plus RENDER, for a block in which a sounding voice is retriggered
+  - the most expensive block over the whole sound, not only the first: a
+    drum's body after its attack, or the end of a long decay, can cost
+    more than its start
   - the most expensive parameter settings, notes and sample-service calls
-  - the program running from slow external memory
+  - the wait states of every external memory access (see "Memory timing"),
+    wherever the firmware places the program and whatever runs on the
+    other tracks
 
-  Hardware | Per-track limit
-  ---------+-----------------
-  MD MKI   | 3,951
-  MD MKII  | 3,951
+Do not add the firmware's own work or its safety margin: the firmware
+adds those itself.
 
-The limit guarantees that every track can run any installed machine at
-the same time. The firmware rejects a package that declares zero (an
-unfinished package) or more than the limit. It does not measure the
-machine itself, so measure the cost in a simulator before declaring it.
+Measure and stamp the cycle counts with mds-certifier, from mds-tools.
+It tests a fixed set of parameter values and voice states, so check any
+costlier paths it may not reach.
+
+Measure again after changing the machine's code, parameters that affect
+the test schedule, imported services or the certifier; never copy an
+older machine's cycle counts into a changed program. A firmware change to
+its admission allowances alone does not require measuring unchanged
+machine code again, as long as the machine ABI, imported service costs
+and memory timing stay compatible.
+
+The firmware adds up the cycle counts of every track in a Kit, plus its
+own work on each track, and checks the total against the DSP limit. There
+is no cycle limit per track or per machine. The firmware refuses a package
+only when its MKII cycle count (bytes 70...71) is zero, which marks it
+unfinished.
+
+To run on all sixteen tracks, the cycle count the firmware uses must be
+at most 3,073 on MKI and 3,000 on MKII. These figures already include the
+firmware's own work on each track. A machine that needs more can still
+play on fewer tracks, or beside less demanding machines.
+
+On MKI, the firmware may place a program in SRAM, where it usually needs
+fewer cycles than in DRAM. It uses the SRAM cycle count while the program
+sits in SRAM, and the DRAM cycle count otherwise, or wherever the program
+sits if the SRAM count is zero. Only a DRAM cycle count within 3,073
+guarantees sixteen tracks on MKI.
+
+Compatibility:
+
+In the first MDS revision, the single cycle count included firmware
+dispatch overhead. A zero MKI count marks such a legacy declaration; the
+version byte alone does not, since transitional 1.0 packages may already
+contain per-board counts. To update a legacy file, remeasure all three
+cycle counts rather than subtracting an assumed firmware allowance.
+
+Older certifications treated the MKII audio-input and main-output rings
+as internal memory. Remeasure packages that import AUDIO_INPUT or
+MAIN_OUTPUT; their code and imports can stay unchanged.
+
+Newly certified machines require firmware that reports capability bit 5,
+which indicates support for the MKI cycle fields in bytes 72...75.
+
+Memory timing:
+
+Internal memory has no wait states: P:$000000...$0003FF and
+X/Y:$000000...$000BFF, which hold the 32-word temporary areas and, on
+MKI, the audio-input and main-output rings. Every access to external
+memory adds wait states to the instruction that makes it, and the two
+models have different external memory:
+
+  Memory                           | MD MKII         | MD MKI
+  ---------------------------------+-----------------+--------------------
+  Machine program (cache misses)   | 1 per word      | 2 in the open page,
+                                   |                 | 8 otherwise;
+                                   |                 | 1 in SRAM
+  Built-in sine table (symbol 1)   | 1               | 1
+  Audio-input and main-output      | 1               | 0 (internal)
+  rings (symbols 2 and 4)          |                 |
+  Track external memory (symbol 6) | 1               | 2 in the open page,
+                                   |                 | 8 otherwise
+  Samples, RAM slots and           | 4, then the bus | 2 in the open page,
+  RAM_WORKSPACE memory             | is held 1 more  | 8 otherwise
+
+The instruction cache holds 1,024 words in eight 128-word sectors and
+fetches one word per miss. Assume it is empty when your track starts:
+other machines run between your track's blocks. This also applies when
+several tracks use the same program; do not assume cross-track cache
+reuse.
+
+MKI's machine program (unless it sits in SRAM), track and sample memory
+share one open 512-word DRAM page. A program cache miss and a data access
+compete for the same page. An access in the same page as the previous DRAM
+access costs 2 wait states; any other costs 8. A refresh every 1,472
+clocks holds the bus for 9 clocks and closes the page. Reading a delay
+line or a sample in order stays mostly in one page. Alternating between
+track memory and a sample, or jumping around a table in track memory,
+costs 8 every time: 64 such accesses add 512 clocks on MKI but 64 on MKII.
+
+Instruction timing also includes pipeline interlocks, not only nominal
+opcode clocks. In particular, register/address dependencies and a one-word
+DO-loop body can add clocks. External program fetches and data accesses
+share one bus: an access can wait for an earlier access or refresh to
+finish as well as paying its own wait states. Simply adding one wait per
+access or counting instructions is not a sufficient cycle estimate. The
+certifier models these effects.
+
+Keep wait states low, especially on MKI: hold data you use often in
+internal memory, and read track memory and samples in order.
 
 MDM1 machine description:
 
@@ -173,8 +283,8 @@ relative to other machine codes.
 
 This is display metadata only: it does not change the stored slot, machine
 ID, kit assignments or MIDI addressing. Nonzero order requires capability
-feature bit 2 (see MDX_MachineDumpProtocol.txt). Older packages retain order
-zero. Earlier firmware may reject packages containing nonzero order.
+feature bit 2 (see MDX_MachineDumpProtocol.txt). Packages without ordering
+metadata use zero.
 
 Each parameter description contains:
 
@@ -204,6 +314,7 @@ setting before sending it to the DSP.
   $35 Switch                               | Boolean      | 0 or 1
   $46 Rotary                               | Index        | Setting minus the declared minimum
   $07 Continuous                           | Decay        | Per-sample envelope multiplier
+  $08 Continuous                           | Tempo        | Length in samples at the current tempo
 
 Q23 is signed 24-bit fixed-point with 23 fraction bits: $000000=0,
 $400000=0.5, $7FFFFF=just below 1, $800000=-1.
@@ -219,9 +330,20 @@ Decay provides a Q23 coefficient to multiply the envelope by each sample:
 decay law can use Raw 14-bit.
 
 Pitch supplies an oscillator increment P. Its frequency in Hz is
-P * 44,100 / 2^21, using the active tuning. For the 32,768-entry sine
-table, advance the table position by P / 64 per output sample, keeping
-the fractional part for subsequent samples.
+P * 44,100 / 2^21, using the active tuning. Across every setting,
+modulation and tuning, P runs from 1,625 (34.2 Hz) to 538,240 (11.3 kHz).
+For the 32,768-entry sine table, advance the table position by P / 64 per
+output sample, keeping the fractional part for subsequent samples.
+
+Tempo provides a length in samples that follows the tempo: setting n is
+n/4 sixteenth-note steps, so 64 is one bar of 4/4 and 127 just under two.
+At 120 BPM, 64 becomes 88,192. The firmware calculates F * S / 128, where
+S is the 14-bit setting (64 is 8192) and F is the number of samples in a
+1/64 note, 270,950,400 / (24 * BPM) * 60 / 4,096, rounding each division
+down. This is the law of the built-in RAM-R LEN and NFX-EV DEL controls.
+The value changes with the tempo, so read it in RENDER if a sound already
+playing should follow. The largest value is about 1,058,000, at 20 BPM.
+Tempo requires capability feature bit 4.
 
 Pitch requires range 0...127; Switch requires 0...1. TONAL capability
 requires at least one Pitch parameter. CONTINUOUS RETRIGGER is described
@@ -307,8 +429,8 @@ Routine calls:
   TRIG    | Start or retrigger the sound.
   RENDER  | Generate the next 32 audio samples for the current track.
 
-When the machine changes, INIT runs before TRIG. RENDER runs every audio
-block, even without a new trigger. Parameter-only updates do not call
+When the machine changes, INIT runs before TRIG, in the same block as TRIG
+and RENDER. RENDER runs every audio block, even without a new trigger. Parameter-only updates do not call
 TRIG. All three routines return with RTS.
 
 Retriggering:
@@ -321,6 +443,28 @@ TRIG, so the machine needs no anti-click code.
 Set CONTINUOUS RETRIGGER (MDM1 byte 6, bit 2) only if TRIG never makes
 the output jump. The firmware then calls TRIG at once, without the fade,
 which would itself cause a click.
+
+Repeats:
+
+A track's retrig settings (RTRG, RTIM) repeat a trigger, whether it came
+from the sequencer, a pad or MIDI. TRIG can tell such a repeat from other
+triggers by reading the TRIGGER_INFO word, import symbol 13 (see "Trigger
+information" in section 4):
+
+  Bit     | Meaning during TRIG
+  --------+--------------------------------------------------------
+  16      | 1: a repeat; 0: a step, pad, MIDI or other trigger
+  Others  | Reserved; ignore
+
+A repeat that coincides with another trigger of the same track counts as
+that trigger, and a track triggered through a trigger link reads bit 16
+clear. Read the word only in TRIG; at other times it describes no
+particular track.
+
+With CONTINUOUS RETRIGGER off, a repeat is faded like any other trigger.
+A machine that lets repeats continue its sound, for example by raising its
+envelope without resetting the phase, sets CONTINUOUS RETRIGGER and must
+then keep every TRIG free of jumps itself.
 
 Panic stop:
 
@@ -335,6 +479,8 @@ Input registers:
   --------+----------+---------------------------------------------------
   All     | R6       | Start of this track's parameter and synthesis memory
   INIT    | R1       | Track number, 0 to 15
+  INIT,   | M0...M7  | $FFFFFF: linear addressing
+  TRIG    |          |
   RENDER  | R7       | Output address in Y memory (see Writing track audio)
   RENDER  | M7       | $1F: circular addressing over 32 output words
   RENDER  | M0...M5  | $FFFFFF: linear addressing
@@ -361,6 +507,10 @@ Keep persistent values in the track's X/Y memory, not registers between
 calls. Normal arithmetic updates to condition flags are allowed.
 Interrupts may occur during any routine; do not disable them.
 Do not use recursion, RTI, WAIT, STOP, RESET or software interrupts.
+
+DO loops must comply with the instruction-sequence restrictions in the
+DSP56300 Family Manual, Rev. 5, section A.3.1. The required distance from
+the end of a loop depends on the instruction.
 
 Machine code must not write another track's memory, interrupt/peripheral
 registers, or program code. Access shared resources through the supported
@@ -542,6 +692,7 @@ Supported imports:
      1 |      3 | Audio-input position             | 1
      1 |      4 | Main-output ring                 | 256
      1 |      5 | Main-output position             | 1
+     1 |     13 | Trigger information              | 1
      2 |      6 | Track external memory base       | 1,536 per track
      3 |      7 | Shared X temporary memory        | 32
      4 |      8 | Shared Y temporary memory        | 32
@@ -600,6 +751,13 @@ does not point to sample data.
     that mix forms a feedback loop.
   - Never write to the ring or its position word.
 
+Trigger information:
+
+Symbol 13 identifies an X-memory word that describes the trigger TRIG is
+handling: bit 16 is set for a repeat (see "Repeats" in section 2). Read it
+only in TRIG, and never write to it. Symbol 13 requires capability feature
+bit 3.
+
 Calling services:
 
 To call a service (kind 5), write the two-word JSR >address with an
@@ -617,24 +775,31 @@ not support a symbol rejects the package.
 
 Service costs:
 
-A machine's declared cost includes the services it calls, but their
+A machine's cycles per track include the services it calls, but their
 code is in the firmware, not in the package. Add these figures to the
 cost of your own code instead of simulating them. Each is the most one
-call can take, in the same clock cycles as the per-track limit, from the
-JSR to the return:
+call can take, including the calling JSR through the service's return.
+Count that interval once: replace its simulated cost with the table
+figure, rather than adding both. Include these costs in the declared
+cycle count. Use the second column, which includes memory wait states,
+starting with an empty cache. The first gives instruction clocks for
+MKII-only stamps:
 
-  Service       | Most clock cycles per call
-  --------------+--------------------------------------------------------
-  SAMPLE_INFO   | 149
-  SAMPLE_READ   | 202 + 33 per requested frame (N0): 1,258 for 32 frames
-  RAM_WORKSPACE | 140
-  RAM_RECORD    | 180 to start a recording
-                | 272 + 55 per frame added (N0): 2,032 for 32 frames
+  Service       | Instruction clocks        | With wait states
+  --------------+---------------------------+---------------------------
+  SAMPLE_INFO   | 147                       | 328
+  SAMPLE_READ   | 199 + 38 per requested    | 487 + 41 per requested
+                | frame (N0): 1,415 for 32  | frame (N0): 1,799 for 32
+  RAM_WORKSPACE | 136                       | 403
+  RAM_RECORD    | 171 to start a recording  | 572 to start a recording
+                | 245 + 58 per frame added  | 1,045 + 59 per frame
+                | (N0): 2,101 for 32 frames | added (N0): 2,933 for 32
 
-The figures cover every supported bank, slot, position, frame value and
-hardware model. A call that is refused or returns zeros costs less. For
-example, a machine that calls SAMPLE_READ for 32 frames in every RENDER
-needs 1,258 of its 3,951 cycles for that call alone.
+The figures cover every supported bank, slot, position and frame value. A
+call that is refused or returns zeros costs less. For example, a machine
+that calls SAMPLE_READ for 32 frames in every RENDER needs 1,799 cycles a
+track for that call alone, which leaves 1,201 of MKII's 3,000-cycle
+ceiling for the rest of its work.
 
 Sample access:
 
@@ -693,7 +858,7 @@ before returning. RENDER must still write all 32 words of its output
 buffer.
 
 Services can be called from INIT, TRIG or RENDER. Count their cost in
-the machine's cycle budget (see "Service costs").
+the machine's cycles per track (see "Service costs").
 
 For one-shot playback, call SAMPLE_INFO in TRIG and keep the length and
 step in the track's memory. RENDER then only needs SAMPLE_READ. If
@@ -731,8 +896,8 @@ read as zero.
 
 RAM_RECORD records into a slot. Recordings can be played by SAMPLE_READ
 and the built-in RAM playback machines. It uses both 32-word temporary
-areas, as SAMPLE_READ does. Adding 32 frames costs up to 2,032 clock
-cycles, about half the per-track limit (see "Service costs").
+areas, as SAMPLE_READ does. Adding 32 frames costs up to 2,933 clocks
+(see "Service costs").
 
   Input        | Meaning
   -------------+--------------------------------------------------------
@@ -847,6 +1012,7 @@ bounds and values explicitly. control defaults according to transform:
   boolean               | switch
   index                 | rotary
   decay                 | continuous
+  tempo                 | continuous
 
 An explicit control must be compatible with its transform. linked defaults
 to false; value_text may supply display labels as described in section 1.
@@ -880,7 +1046,13 @@ An omitted offset selects the word immediately after the labelled
 instruction. Imported resource offsets remain in that operand; function
 call operands must be zero, as described in section 4.
 
-max_track_cycles is an optional cycle declaration. Omission means zero,
-a draft package that cannot be installed. An installable package must
-carry a valid worst-case bound as described under Per-track cycle budget
-in section 1. Changing source requires checking that bound again.
+Cycle declarations:
+
+  JSON field            | Header bytes | Cycle count
+  ----------------------+--------------+----------------------
+  max_track_cycles      | 70...71      | MKII
+  mk1_track_cycles      | 72...73      | MKI, program in DRAM
+  mk1_sram_track_cycles | 74...75      | MKI, program in SRAM
+
+An omitted count is zero. Each count follows the rules under "Cycles per
+track" in section 1.

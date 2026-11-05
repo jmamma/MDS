@@ -3,6 +3,7 @@
 ; Imports (main_rec.json):
 ;   START, ADD     kind 5, symbol 12: RAM_RECORD
 ;   MAIN_POSITION  kind 1, symbol 5: the word holding this block's address
+;   MAIN_RING      kind 1, symbol 4: the first word of the 256-word ring
 ;   FRAMES         kind 3, symbol 7: X temporary memory, 32 words
 ;
 ; A trigger starts a recording into slot SLOT: X0 = the slot, N0 = 0 and
@@ -46,7 +47,13 @@ RENDER:
         tst     a
         beq     <DONE
 MAIN_POSITION:
-        move    x:>$000000,r0           ; symbol 5: this block's main output
+        move    x:>$000000,a            ; symbol 5: this block's address
+MAIN_RING:
+        move    #>$000000,x0            ; symbol 4: the main-output ring
+        sub     x0,a                    ; the block's offset in the ring
+        and     #>$ff,a
+        add     x0,a                    ; back to the sample address
+        move    a1,r0
         movec   #>$ffffff,m0
 FRAMES:
         move    #>$000000,r1            ; symbol 7: X temporary memory

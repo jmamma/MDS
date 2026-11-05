@@ -1,21 +1,24 @@
 * Machine Dump Protocol *
 -------------------------
 
-MDS version 1
+MDS version 1.1
+
+Revision history: Changelog.
 
 This document describes how to transfer MDS user machines to and from
 the Machinedrum using MIDI Sysex. See MDX_MachineDumpStandard.txt for
 the .mds file format.
 
-MDS version 1 is supported by Machinedrum OS X.20.
+The firmware accepts MDS 1.0 and 1.1 packages.
 
 Numbers prefixed with $ or 0x are hexadecimal. Other numbers are decimal.
 
 Message format:
 
-A machine dump contains one DSP56303 synthesis machine, installable in
-any of the 16 Machine Bank slots (01 to 16 on the device, Sysex slot
-numbers 0 to 15).
+A machine dump contains one DSP56303 synthesis machine, installable in a
+slot of the selected Machine Bank. Use the slot count in Capability Reply:
+original firmware has 16 slots; current +Drive banks have 48. Sysex slot
+numbers start at 0; the device displays slots starting at 01.
 
 (SYSEX init) = $F0 $00 $20 $3C $02 $00.
 
@@ -25,13 +28,13 @@ Every message uses the following format:
   -------------+--------------------------------------------
   (SYSEX init) |
            $74 | USR machine message
-           $01 | MDS version
+           $01 | Protocol version
      %0ooooooo | Command (see below)
      %0ttttttt | Transaction ID, upper 7 bits
      %0ttttttt | Transaction ID, lower 7 bits
-     %0sssssss | Slot: 0 to 15, or $7F where permitted
+     %0sssssss | Slot: 0 to reported slot count - 1, or $7F where permitted
      %0qqqqqqq | Packet sequence, or $7F when not applicable
-           $00 | Flags; zero in version 1
+           $00 | Flags: zero
            ... | 7-bit-packed body
      %0ccccccc | Checksum, upper 7 bits
      %0ccccccc | Checksum, lower 7 bits
@@ -64,7 +67,7 @@ Commands:
       $04 | Query Machine Slots | None
       $05 | Machine Slots Reply | 356-byte slot list
       $06 | Capability Request  | None
-      $07 | Capability Reply    | 38-byte capabilities
+      $07 | Capability Reply    | 34-byte capabilities
       $7B | End of Dump         | None
       $7C | WAIT                | Command, reason
       $7D | CANCEL              | Command, reason
@@ -210,16 +213,25 @@ Capability Reply body, in order:
       2 | Reserved
       4 | Feature flags
       4 | Reserved
-      4 | Frame cycle budget (clock cycles)
-      4 | Admission cycle budget (clock cycles)
+      4 | DSP limit (clock cycles)
 
 Free-space values refer to the machine library currently selected.
 
-Frame cycle budget is the DSP time available for one complete audio
-frame (71,680 clocks). Admission cycle budget is what sixteen tracks of
-one machine may cost together (63,216 clocks): divided by sixteen, it is
-the per-track limit a machine's declared cost is checked against (3,951
-clocks; see "Per-track cycle budget" in MDX_MachineDumpStandard.txt).
+The DSP limit is the allowance for all sixteen track charges in one
+32-sample audio block, after the firmware's shared reserve and margin.
+Track charges include firmware overhead as well as declared machine cost.
+The X.20 firmware reports:
+
+  Model | Clock cycles
+  ------+-------------
+  MKI   | 63,741
+  MKII  | 65,160
+
+Use the reported value rather than hard-coding these figures. Do not
+divide it by sixteen to obtain a machine-only cycle target: admission adds
+firmware charges to each declaration. Use the sixteen-instance ceilings in
+the Standard. Admission charges tracks independently with cold-cache
+costs; the reported limit is not a measurement of current DSP utilization.
 
 Feature flags:
 
@@ -229,6 +241,10 @@ Feature flags:
     1 | RAM services: RAM bank access through SAMPLE_INFO and
       | SAMPLE_READ, RAM_RECORD and RAM_WORKSPACE
     2 | Category ordering from machine metadata
+    3 | Trigger information import (symbol 13)
+    4 | Tempo parameter conversion ($08)
+    5 | MKI cycles per track in header bytes 72-73, and with the
+      | program in SRAM in bytes 74-75; no cycle limit at installation.
 
 Other bits are reserved; ignore them. Only use a feature if its bit is
 set. The features are described in MDX_MachineDumpStandard.txt.
@@ -245,6 +261,4 @@ NAK reasons:
    8 = Reserved                 17 = Library full
    9 = Receiver not ready       18 = Cycle budget
 
-For reason 18, the NAK detail is the device's maximum permitted per-track
-clock count (3,951 in this version). Zero or a declared count above this
-limit causes the rejection.
+Reason 18 refuses a package whose bytes 70-71 are zero.

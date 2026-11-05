@@ -1,5 +1,5 @@
 {
-  "id": "org.spsx.example.ram-echo",
+  "id": "org.mdx.example.ram-echo",
   "display_name": "RAM ECHO",
   "description": "an echo on the track before, in a RAM slot (UW only)",
   "category": "EX",
